@@ -59,3 +59,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 ---
 
 <p align="center">Made with ❤️ using Jetpack Compose</p>
+
+
+## ⬇️ Download
+[Download latest APK](https://github.com/clement-mueller/Media-X-Manager/actions)
