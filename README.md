@@ -1,3 +1,6 @@
+## ⬇️ Download
+[![Download](https://img.shields.io/badge/Download-Latest%20APK-brightgreen?style=for-the-badge&logo=github)](https://github.com/clement-mueller/Media-X-Manager/releases/latest)
+
 # 🎵 Media X Manager
 
 A sleek Android media controller app built with **Jetpack Compose** and **Material 3**. Control any media playing on your device — music, podcasts, videos — from a single beautiful interface.
