@@ -94,4 +94,17 @@ class MediaControllerManager(private val context: Context) {
             _mediaState.value = MediaUiState(isConnected = false)
         }
     }
+
+    fun updateProgress() {
+        val controller = mediaController ?: return
+        val metadata = controller.metadata
+        val playbackState = controller.playbackState
+        val position = playbackState?.position ?: 0L
+        val duration = metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
+        val progress = if (duration > 0) position.toFloat() / duration.toFloat() else 0f
+        _mediaState.value = _mediaState.value.copy(
+            progress = progress,
+            position = position
+        )
+    }
 }

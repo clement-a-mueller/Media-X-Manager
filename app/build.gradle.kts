@@ -61,4 +61,7 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.8.2")
 
     implementation("androidx.palette:palette-ktx:1.0.0")
+
+    implementation("com.google.accompanist:accompanist-systemuicontroller:0.31.5-beta")
+// or latest
 }

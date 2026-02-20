@@ -3,6 +3,7 @@ package com.example.mediaxmanager.ui.theme
 import android.os.Build
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
 private val AppTypography = Typography()
@@ -14,12 +15,12 @@ fun MediaControllerTheme(
     val context = LocalContext.current
     val colorScheme =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            dynamicDarkColorScheme(context)  // ← dark dynamic theme
+            dynamicDarkColorScheme(context)
         } else {
-            darkColorScheme()  // ← fallback dark theme
+            darkColorScheme()
         }
     MaterialTheme(
-        colorScheme = colorScheme,
+        colorScheme = colorScheme.copy(background = Color.Transparent),
         typography = AppTypography,
         content = content
     )
