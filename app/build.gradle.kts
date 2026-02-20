@@ -59,4 +59,6 @@ dependencies {
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     implementation("androidx.activity:activity-compose:1.8.2")
+
+    implementation("androidx.palette:palette-ktx:1.0.0")
 }

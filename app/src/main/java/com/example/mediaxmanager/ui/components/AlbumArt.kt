@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.dp
 
@@ -18,8 +19,12 @@ import androidx.compose.ui.unit.dp
 fun AlbumArt(bitmap: Bitmap?) {
     Box(
         modifier = Modifier
-            .size(220.dp)
-            .clip(RoundedCornerShape(16.dp))
+            .shadow(
+                elevation = 16.dp,
+                shape = RoundedCornerShape(24.dp)
+            )
+            .size(300.dp)
+            .clip(RoundedCornerShape(24.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant),
         contentAlignment = Alignment.Center
     ) {
@@ -27,7 +32,7 @@ fun AlbumArt(bitmap: Bitmap?) {
             Image(
                 bitmap = bitmap.asImageBitmap(),
                 contentDescription = "Album Art",
-                modifier = Modifier.size(220.dp)
+                modifier = Modifier.size(300.dp)
             )
         }
     }

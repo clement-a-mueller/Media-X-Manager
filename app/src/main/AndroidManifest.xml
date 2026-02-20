@@ -7,7 +7,9 @@
     <application
         android:allowBackup="true"
         android:label="Media Controller"
-        android:theme="@style/Theme.MediaController">
+        android:theme="@style/Theme.MediaController"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round">
 
         <activity
             android:name=".MainActivity"

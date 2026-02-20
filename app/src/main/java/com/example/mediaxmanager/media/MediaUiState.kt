@@ -10,5 +10,8 @@ data class MediaUiState(
     val album: String = "",
     val artwork: Bitmap? = null,
     val isPlaying: Boolean = false,
-    val playbackState: Int = PlaybackState.STATE_NONE
+    val playbackState: Int = PlaybackState.STATE_NONE,
+    val progress: Float = 0f,        // ← 0.0 to 1.0
+    val duration: Long = 0L,
+    val position: Long = 0L
 )
