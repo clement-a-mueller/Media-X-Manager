@@ -8,6 +8,7 @@ import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import android.media.session.MediaSession
 
 class MediaControllerManager(private val context: Context) {
     private val mediaSessionManager =
@@ -19,6 +20,7 @@ class MediaControllerManager(private val context: Context) {
     private val controllerCallback = object : MediaController.Callback() {
         override fun onPlaybackStateChanged(state: PlaybackState?) { updateState() }
         override fun onMetadataChanged(metadata: MediaMetadata?) { updateState() }
+        override fun onQueueChanged(queue: MutableList<MediaSession.QueueItem>?) { updateState() }
         override fun onSessionDestroyed() {
             _mediaState.value = MediaUiState(isConnected = false)
         }
@@ -56,6 +58,13 @@ class MediaControllerManager(private val context: Context) {
         val duration = metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
         val progress = if (duration > 0) position.toFloat() / duration.toFloat() else 0f
 
+        val queue = controller.queue?.map {
+            QueueItem(
+                title = it.description.title?.toString() ?: "Unknown",
+                artist = it.description.subtitle?.toString() ?: ""
+            )
+        } ?: emptyList()
+
         _mediaState.value = MediaUiState(
             isConnected = true,
             title = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE) ?: "",
@@ -66,7 +75,8 @@ class MediaControllerManager(private val context: Context) {
             playbackState = playbackState?.state ?: PlaybackState.STATE_NONE,
             progress = progress,
             duration = duration,
-            position = position
+            position = position,
+            queue = queue
         )
     }
 

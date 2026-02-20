@@ -21,6 +21,7 @@ import kotlin.math.abs
 fun WaveSlider(
     value: Float,
     onValueChange: (Float) -> Unit,
+    onValueChangeFinished: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     activeColor: Color = Color.White,
     inactiveColor: Color = Color.White.copy(alpha = 0.3f)
@@ -62,7 +63,10 @@ fun WaveSlider(
             .pointerInput(Unit) {
                 detectHorizontalDragGestures(
                     onDragStart = { isSeeking = true },
-                    onDragEnd = { isSeeking = false },
+                    onDragEnd = {
+                        isSeeking = false
+                        onValueChangeFinished?.invoke()
+                    },
                     onDragCancel = { isSeeking = false },
                     onHorizontalDrag = { change, _ ->
                         val newValue = (change.position.x / sliderWidth).coerceIn(0f, 1f)
