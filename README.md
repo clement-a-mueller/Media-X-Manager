@@ -18,7 +18,10 @@ A sleek Android media controller app built with **Jetpack Compose** and **Materi
 
 ## 📸 Screenshots
 
-> _Coming soon_
+<img src="https://github.com/user-attachments/assets/73046284-7206-43f3-920c-97bf87b27ece" height="500">   
+<img src="https://github.com/user-attachments/assets/acd05c6f-ca3a-42af-a76e-f71d76d3ac88" height="500"> 
+<img src="https://github.com/user-attachments/assets/ac69dcd7-6a3a-4e5c-a65b-fddfe49182b2" height="500"> 
+<img src="https://github.com/user-attachments/assets/bd0dfcbc-892a-4ce3-8b9a-3ea0cb851ba5" height="500">
 
 ---
 
