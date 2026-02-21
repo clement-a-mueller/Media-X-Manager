@@ -25,6 +25,7 @@ import kotlin.math.roundToInt
 fun QueueSheet(
     queue: List<QueueItem>,
     currentTitle: String,
+    isSpotify: Boolean = false,
     onDismiss: () -> Unit
 ) {
     var offsetY by remember { mutableStateOf(0f) }
@@ -99,7 +100,7 @@ fun QueueSheet(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        "No queue available",
+                        if (isSpotify) "Queue unavailable for Spotify" else "No queue available",
                         color = Color.White.copy(alpha = 0.5f),
                         style = MaterialTheme.typography.bodyMedium
                     )

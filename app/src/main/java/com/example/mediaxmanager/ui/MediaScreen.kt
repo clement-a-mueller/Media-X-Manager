@@ -3,10 +3,10 @@ package com.example.mediaxmanager.ui
 import android.content.Context
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -19,12 +19,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.mediaxmanager.media.MediaViewModel
 import com.example.mediaxmanager.ui.components.GlassNavBar
 import com.example.mediaxmanager.ui.screens.HomeScreen
+import com.example.mediaxmanager.ui.screens.SearchScreen
 import com.example.mediaxmanager.ui.screens.SettingsScreen
 import com.example.mediaxmanager.ui.screens.extractDominantColor
 import com.example.mediaxmanager.ui.theme.AppStyle
 
 sealed class Screen {
     object Home : Screen()
+    object Search : Screen()
     object Settings : Screen()
 }
 
@@ -32,9 +34,9 @@ sealed class Screen {
 fun MediaScreen(viewModel: MediaViewModel) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("settings", Context.MODE_PRIVATE) }
-
     val state by viewModel.mediaState.collectAsStateWithLifecycle()
     var selectedScreen by remember { mutableStateOf<Screen>(Screen.Home) }
+
     var appStyle by remember {
         mutableStateOf(
             try {
@@ -48,11 +50,17 @@ fun MediaScreen(viewModel: MediaViewModel) {
         )
     }
 
-    val selectedIndex = if (selectedScreen is Screen.Home) 0 else 1
+    val selectedIndex = when (selectedScreen) {
+        is Screen.Home -> 0
+        is Screen.Search -> 1
+        is Screen.Settings -> 2
+    }
+
     val dominantColor = remember(state.artwork) { extractDominantColor(state.artwork) }
     val navBarColor by animateColorAsState(
         targetValue = when {
             selectedScreen is Screen.Settings -> Color(0xFF000000)
+            selectedScreen is Screen.Search -> Color(0xFF000000)
             appStyle == AppStyle.DYNAMIC -> dominantColor.copy(alpha = 0.85f)
             else -> Color(0xFF000000)
         },
@@ -63,6 +71,8 @@ fun MediaScreen(viewModel: MediaViewModel) {
     val content: @Composable () -> Unit = {
         when (selectedScreen) {
             is Screen.Home -> HomeScreen(viewModel, appStyle)
+            // Pass viewModel so TrackRow clicks play through HomeScreen's local player
+            is Screen.Search -> SearchScreen(viewModel)
             is Screen.Settings -> SettingsScreen(
                 currentStyle = appStyle,
                 onStyleChange = { newStyle ->
@@ -80,6 +90,7 @@ fun MediaScreen(viewModel: MediaViewModel) {
             GlassNavBar(
                 selectedIndex = selectedIndex,
                 onHomeClick = { selectedScreen = Screen.Home },
+                onSearchClick = { selectedScreen = Screen.Search },
                 onSettingsClick = { selectedScreen = Screen.Settings },
                 modifier = Modifier.align(Alignment.BottomCenter)
             )
@@ -102,24 +113,23 @@ fun MediaScreen(viewModel: MediaViewModel) {
                 NavigationBarItem(
                     selected = selectedScreen is Screen.Home,
                     onClick = { selectedScreen = Screen.Home },
-                    icon = {
-                        Icon(Icons.Default.Home, contentDescription = "Home", tint = Color.White)
-                    },
+                    icon = { Icon(Icons.Default.Home, contentDescription = "Home", tint = Color.White) },
                     label = { Text("Home", color = Color.White) },
-                    colors = NavigationBarItemDefaults.colors(
-                        indicatorColor = Color.White.copy(alpha = 0.2f)
-                    )
+                    colors = NavigationBarItemDefaults.colors(indicatorColor = Color.White.copy(alpha = 0.2f))
+                )
+                NavigationBarItem(
+                    selected = selectedScreen is Screen.Search,
+                    onClick = { selectedScreen = Screen.Search },
+                    icon = { Icon(Icons.Default.Search, contentDescription = "Search", tint = Color.White) },
+                    label = { Text("Search", color = Color.White) },
+                    colors = NavigationBarItemDefaults.colors(indicatorColor = Color.White.copy(alpha = 0.2f))
                 )
                 NavigationBarItem(
                     selected = selectedScreen is Screen.Settings,
                     onClick = { selectedScreen = Screen.Settings },
-                    icon = {
-                        Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Color.White)
-                    },
+                    icon = { Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Color.White) },
                     label = { Text("Settings", color = Color.White) },
-                    colors = NavigationBarItemDefaults.colors(
-                        indicatorColor = Color.White.copy(alpha = 0.2f)
-                    )
+                    colors = NavigationBarItemDefaults.colors(indicatorColor = Color.White.copy(alpha = 0.2f))
                 )
             }
         }

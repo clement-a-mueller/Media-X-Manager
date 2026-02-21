@@ -14,8 +14,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
-import kotlin.math.sin
 import kotlin.math.abs
+import kotlin.math.sin
 
 @Composable
 fun WaveSlider(
@@ -26,7 +26,6 @@ fun WaveSlider(
     activeColor: Color = Color.White,
     inactiveColor: Color = Color.White.copy(alpha = 0.3f)
 ) {
-    // Animated progress — snaps fast on big jumps, smooth on small ticks
     val animatedValue by animateFloatAsState(
         targetValue = value,
         animationSpec = if (abs(value - 0f) > 0.05f) {
@@ -47,7 +46,6 @@ fun WaveSlider(
         label = "phase"
     )
 
-    // Wave amplitude pulses when seeking
     var isSeeking by remember { mutableStateOf(false) }
     val waveAmplitude by animateFloatAsState(
         targetValue = if (isSeeking) 12f else 6f,
@@ -60,24 +58,34 @@ fun WaveSlider(
     Canvas(
         modifier = modifier
             .height(36.dp)
+            // Drag gesture — tracks absolute X position correctly
             .pointerInput(Unit) {
                 detectHorizontalDragGestures(
-                    onDragStart = { isSeeking = true },
+                    onDragStart = { offset ->
+                        isSeeking = true
+                        val newValue = (offset.x / sliderWidth).coerceIn(0f, 1f)
+                        onValueChange(newValue)
+                    },
                     onDragEnd = {
                         isSeeking = false
                         onValueChangeFinished?.invoke()
                     },
-                    onDragCancel = { isSeeking = false },
+                    onDragCancel = {
+                        isSeeking = false
+                    },
                     onHorizontalDrag = { change, _ ->
+                        // Use absolute position within the canvas, not delta
                         val newValue = (change.position.x / sliderWidth).coerceIn(0f, 1f)
                         onValueChange(newValue)
                     }
                 )
             }
+            // Tap gesture — also triggers onValueChangeFinished
             .pointerInput(Unit) {
                 detectTapGestures { offset ->
                     val newValue = (offset.x / sliderWidth).coerceIn(0f, 1f)
                     onValueChange(newValue)
+                    onValueChangeFinished?.invoke()
                 }
             }
     ) {
@@ -116,7 +124,7 @@ fun WaveSlider(
             )
         }
 
-        // Thumb — slightly bigger while seeking
+        // Thumb
         drawCircle(
             color = activeColor,
             radius = if (isSeeking) 8.dp.toPx() else 6.dp.toPx(),

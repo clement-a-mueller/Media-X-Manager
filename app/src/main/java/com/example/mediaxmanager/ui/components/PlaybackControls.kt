@@ -5,10 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -22,15 +19,29 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun PlaybackControls(
     isPlaying: Boolean,
+    isShuffling: Boolean = false,
+    repeatMode: Int = 0,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
-    onPrevious: () -> Unit
+    onPrevious: () -> Unit,
+    onShuffle: () -> Unit = {},
+    onRepeat: () -> Unit = {}
 ) {
     Row(
-        horizontalArrangement = Arrangement.spacedBy(24.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Previous — medium size
+        // Shuffle
+        Icon(
+            imageVector = Icons.Default.Shuffle,
+            contentDescription = "Shuffle",
+            tint = if (isShuffling) Color.White else Color.White.copy(alpha = 0.4f),
+            modifier = Modifier
+                .size(28.dp)
+                .clickable { onShuffle() }
+        )
+
+        // Previous
         TransparentIconButton(
             icon = Icons.Default.SkipPrevious,
             onClick = onPrevious,
@@ -38,7 +49,7 @@ fun PlaybackControls(
             iconSize = 32.dp
         )
 
-        // Play/Pause — largest, more opaque
+        // Play/Pause
         TransparentIconButton(
             icon = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
             onClick = onPlayPause,
@@ -47,12 +58,22 @@ fun PlaybackControls(
             backgroundAlpha = 0.35f
         )
 
-        // Next — medium size
+        // Next
         TransparentIconButton(
             icon = Icons.Default.SkipNext,
             onClick = onNext,
             size = 64.dp,
             iconSize = 32.dp
+        )
+
+        // Repeat
+        Icon(
+            imageVector = if (repeatMode == 2) Icons.Default.RepeatOne else Icons.Default.Repeat,
+            contentDescription = "Repeat",
+            tint = if (repeatMode != 0) Color.White else Color.White.copy(alpha = 0.4f),
+            modifier = Modifier
+                .size(28.dp)
+                .clickable { onRepeat() }
         )
     }
 }

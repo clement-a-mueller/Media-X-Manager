@@ -19,5 +19,7 @@ data class MediaUiState(
     val progress: Float = 0f,
     val duration: Long = 0L,
     val position: Long = 0L,
-    val queue: List<QueueItem> = emptyList()
+    val queue: List<QueueItem> = emptyList(),
+    val isShuffling: Boolean = false,
+    val repeatMode: Int = 0
 )
