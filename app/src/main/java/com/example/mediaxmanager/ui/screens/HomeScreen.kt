@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.palette.graphics.Palette
 import com.example.mediaxmanager.media.MediaViewModel
+import com.example.mediaxmanager.media.QueueItem
 import com.example.mediaxmanager.ui.components.AlbumArt
 import com.example.mediaxmanager.ui.components.FullscreenArtwork
 import com.example.mediaxmanager.ui.components.PlaybackControls
@@ -39,6 +40,7 @@ import com.example.mediaxmanager.ui.theme.AppStyle
 import com.example.mediaxmanager.ui.utils.formatDuration
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import androidx.compose.foundation.clickable
 
 fun extractDominantColor(bitmap: Bitmap?): Color {
     if (bitmap == null) return Color(0xFF1C1B1F)
@@ -75,6 +77,7 @@ fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
     val isLocalPlaying by viewModel.isLocalPlaying.collectAsStateWithLifecycle()
     val localArtwork by viewModel.localArtwork.collectAsStateWithLifecycle()
     val localTrack by viewModel.localTrack.collectAsStateWithLifecycle()
+    val localQueue by viewModel.localQueue.collectAsStateWithLifecycle()
 
     var showFullscreenArt by remember { mutableStateOf(false) }
     var showQueue by remember { mutableStateOf(false) }
@@ -92,9 +95,14 @@ fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
     val effectiveProgress = seekPosition ?: state.progress
     val effectivePosition = state.position
     val effectiveDuration = state.duration
+    val hasValidDuration = effectiveDuration > 0
 
-    // Whether seeking/time display makes sense for current source
-    val hasValidDuration = if (useLocalMedia) effectiveDuration > 0 else state.duration > 0
+    // Queue: use local track list when in local mode, Spotify queue otherwise
+    val effectiveQueue = if (useLocalMedia) {
+        localQueue.map { QueueItem(title = it.title, artist = it.artist) }
+    } else {
+        state.queue
+    }
 
     val gesturesEnabled = remember { prefs.getBoolean("gestures_enabled", false) }
     val lyricsEnabled = remember { prefs.getBoolean("lyrics_enabled", false) }
@@ -261,17 +269,6 @@ fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
                     )
                 }
 
-                if (lyricsEnabled && lyricsLines.isNotEmpty() && currentLineIndex >= 0) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = lyricsLines[currentLineIndex].text,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(alpha = 0.5f),
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
-                    )
-                }
-
                 Spacer(Modifier.height(16.dp))
 
                 if (appStyle == AppStyle.MINIMAL) {
@@ -349,6 +346,17 @@ fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
                         style = MaterialTheme.typography.labelMedium
                     )
                 }
+
+                if (lyricsEnabled && lyricsLines.isNotEmpty() && currentLineIndex >= 0) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = lyricsLines[currentLineIndex].text,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White.copy(alpha = 0.5f),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                    )
+                }
             }
 
             Box(
@@ -379,11 +387,23 @@ fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
         }
 
         if (showQueue) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+            // Scrim — catches taps outside the sheet to dismiss it
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.4f))
+                    .clickable { showQueue = false }
+            )
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.BottomCenter
+            ) {
                 QueueSheet(
-                    queue = state.queue,
+                    queue = effectiveQueue,
                     currentTitle = effectiveTitle,
                     isSpotify = !useLocalMedia,
+                    localQueue = localQueue,
+                    onRemoveFromQueue = { index -> viewModel.removeFromLocalQueue(index) },
                     onDismiss = { showQueue = false }
                 )
             }

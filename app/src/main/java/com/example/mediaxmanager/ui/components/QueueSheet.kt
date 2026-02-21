@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -19,6 +21,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.example.mediaxmanager.media.QueueItem
+import com.example.mediaxmanager.ui.screens.LocalTrack
 import kotlin.math.roundToInt
 
 @Composable
@@ -26,13 +29,14 @@ fun QueueSheet(
     queue: List<QueueItem>,
     currentTitle: String,
     isSpotify: Boolean = false,
+    localQueue: List<LocalTrack> = emptyList(),
+    onRemoveFromQueue: ((Int) -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     var offsetY by remember { mutableStateOf(0f) }
     var sheetHeight by remember { mutableStateOf(0) }
     var isDismissing by remember { mutableStateOf(false) }
 
-// Simple fixed speed: 800ms for full sheet, scales down if already dragged
     val remainingDistance = if (sheetHeight > 0) sheetHeight - offsetY else 0f
     val dismissDuration = ((remainingDistance / sheetHeight.toFloat()) * 800).toInt().coerceAtLeast(100)
 
@@ -42,6 +46,13 @@ fun QueueSheet(
         finishedListener = { if (isDismissing) onDismiss() },
         label = "sheetOffset"
     )
+
+    val displayQueue = remember(isSpotify, localQueue, queue) {
+        if (!isSpotify && localQueue.isNotEmpty())
+            localQueue.map { QueueItem(it.title, it.artist) }
+        else
+            queue
+    }
 
     Column(
         modifier = Modifier
@@ -54,7 +65,7 @@ fun QueueSheet(
                 shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
             )
     ) {
-        // Drag area covers entire top section
+        // Drag handle
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -76,7 +87,6 @@ fun QueueSheet(
                 },
             contentAlignment = Alignment.Center
         ) {
-            // Pill indicator
             Box(
                 modifier = Modifier
                     .width(40.dp)
@@ -86,28 +96,52 @@ fun QueueSheet(
         }
 
         Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-            Text(
-                "Up Next",
-                style = MaterialTheme.typography.titleMedium,
-                color = Color.White
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "Up Next",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White
+                )
+                if (!isSpotify && localQueue.isNotEmpty()) {
+                    Text(
+                        "${localQueue.size} track${if (localQueue.size != 1) "s" else ""}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White.copy(alpha = 0.4f)
+                    )
+                }
+            }
+
             Spacer(Modifier.height(12.dp))
-            if (queue.isEmpty()) {
+
+            if (isSpotify) {
                 Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(32.dp),
+                    modifier = Modifier.fillMaxWidth().padding(32.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        if (isSpotify) "Queue unavailable for Spotify" else "No queue available",
+                        "Queue unavailable for Spotify",
+                        color = Color.White.copy(alpha = 0.5f),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            } else if (displayQueue.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "No queue available",
                         color = Color.White.copy(alpha = 0.5f),
                         style = MaterialTheme.typography.bodyMedium
                     )
                 }
             } else {
                 LazyColumn {
-                    itemsIndexed(queue) { index, item ->
+                    itemsIndexed(displayQueue) { index, item ->
                         val isCurrent = item.title == currentTitle
                         Row(
                             modifier = Modifier
@@ -137,6 +171,19 @@ fun QueueSheet(
                                         style = MaterialTheme.typography.labelSmall,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                            if (onRemoveFromQueue != null && localQueue.isNotEmpty()) {
+                                IconButton(
+                                    onClick = { onRemoveFromQueue(index) },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        contentDescription = "Remove",
+                                        tint = Color.White.copy(alpha = 0.4f),
+                                        modifier = Modifier.size(16.dp)
                                     )
                                 }
                             }

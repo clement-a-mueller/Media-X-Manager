@@ -1,13 +1,11 @@
 package com.example.mediaxmanager.media
 
 import android.app.Application
-import android.content.ContentUris
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
-import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.mediaxmanager.ui.screens.LocalTrack
@@ -18,10 +16,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class MediaViewModel(application: Application) : AndroidViewModel(application) {
-
     private val manager = MediaControllerManager(application)
     val mediaState = manager.mediaState
 
@@ -35,14 +31,17 @@ class MediaViewModel(application: Application) : AndroidViewModel(application) {
     private val _localArtwork = MutableStateFlow<Bitmap?>(null)
     val localArtwork: StateFlow<Bitmap?> = _localArtwork
 
+    private val _localQueue = MutableStateFlow<List<LocalTrack>>(emptyList())
+    val localQueue: StateFlow<List<LocalTrack>> = _localQueue
+
     private var mediaPlayer: MediaPlayer? = null
-    private var localQueue: List<LocalTrack> = emptyList()
+    private var internalQueue: MutableList<LocalTrack> = mutableListOf()
     private var localIndex: Int = 0
     private var isLocalShuffling = false
     private var localRepeatMode = 0
     var spotifyWasPausedByUs = false
 
-    // Combined state that merges Spotify and local
+    // Combined state
     val combinedMediaState = combine(mediaState, _isLocalPlaying, _localTrack) { state, isLocal, track ->
         if (isLocal && track != null) {
             state.copy(
@@ -66,77 +65,30 @@ class MediaViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         viewModelScope.launch {
+            val app = getApplication<Application>()
             while (true) {
-                val refreshRate = application
-                    .getSharedPreferences("settings", Context.MODE_PRIVATE)
+                val refreshRate = app.getSharedPreferences("settings", Context.MODE_PRIVATE)
                     .getInt("refresh_rate", 100)
                 if (mediaState.value.isPlaying || _isLocalPlaying.value) {
                     manager.updateProgress()
                     mediaPlayer?.let { player ->
                         if (player.isPlaying) {
                             val progress = player.currentPosition.toFloat() / player.duration.toFloat()
+                            val position = player.currentPosition.toLong()
+                            val duration = player.duration.toLong()
                             combinedMediaState.value = combinedMediaState.value.copy(
                                 progress = progress,
-                                position = player.currentPosition.toLong(),
-                                duration = player.duration.toLong(),
+                                position = position,
+                                duration = duration,
                                 isPlaying = true
                             )
                         }
                     }
                 }
-                delay(refreshRate.toLong())
+                delay(100)
             }
         }
     }
-
-    // Artwork loading
-    private suspend fun loadArtworkForTrack(context: Context, track: LocalTrack): Bitmap? =
-        withContext(Dispatchers.IO) {
-            // Method A: MediaStore album art table
-            try {
-                val albumId = context.contentResolver.query(
-                    android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-                    arrayOf(android.provider.MediaStore.Audio.Media.ALBUM_ID),
-                    "${android.provider.MediaStore.Audio.Media._ID} = ?",
-                    arrayOf(track.id.toString()),
-                    null
-                )?.use { c ->
-                    if (c.moveToFirst()) c.getLong(0) else null
-                }
-                if (albumId != null) {
-                    val artUri = ContentUris.withAppendedId(
-                        Uri.parse("content://media/external/audio/albumart"),
-                        albumId
-                    )
-                    val bitmap = context.contentResolver.openInputStream(artUri)?.use { stream ->
-                        BitmapFactory.decodeStream(stream)
-                    }
-                    if (bitmap != null) return@withContext bitmap
-                }
-            } catch (_: Exception) {}
-
-            // Method B: file descriptor via ContentResolver
-            try {
-                val retriever = MediaMetadataRetriever()
-                context.contentResolver.openFileDescriptor(track.uri, "r")?.use { pfd ->
-                    retriever.setDataSource(pfd.fileDescriptor)
-                }
-                val bytes = retriever.embeddedPicture
-                retriever.release()
-                if (bytes != null) return@withContext BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            } catch (_: Exception) {}
-
-            // Method C: direct path
-            try {
-                val retriever = MediaMetadataRetriever()
-                retriever.setDataSource(track.path)
-                val bytes = retriever.embeddedPicture
-                retriever.release()
-                if (bytes != null) return@withContext BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            } catch (_: Exception) {}
-
-            null
-        }
 
     // Spotify controls
     fun playPause() = manager.playPause()
@@ -144,8 +96,14 @@ class MediaViewModel(application: Application) : AndroidViewModel(application) {
     fun previous() = manager.previous()
     fun seekTo(progress: Float) = manager.seekTo(progress)
     fun reconnect() = manager.reconnect()
-    fun toggleShuffle() = manager.updateShuffleState(!mediaState.value.isShuffling)
-    fun toggleRepeat() = manager.updateRepeatMode((mediaState.value.repeatMode + 1) % 3)
+
+    fun toggleShuffle() {
+        manager.updateShuffleState(!mediaState.value.isShuffling)
+    }
+
+    fun toggleRepeat() {
+        manager.updateRepeatMode((mediaState.value.repeatMode + 1) % 3)
+    }
 
     // Local media controls
     fun resumeLocalMedia() {
@@ -170,10 +128,25 @@ class MediaViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playLocalTrack(context: Context, track: LocalTrack, queue: List<LocalTrack> = emptyList()) {
-        localQueue = queue.ifEmpty { listOf(track) }
-        localIndex = localQueue.indexOf(track).coerceAtLeast(0)
+        internalQueue = queue.ifEmpty { listOf(track) }.toMutableList()
+        _localQueue.value = internalQueue.toList()
+        localIndex = internalQueue.indexOf(track).coerceAtLeast(0)
         _localTrack.value = track
-        _localArtwork.value = null  // clear old art immediately
+
+        // Extract artwork in background
+        viewModelScope.launch(Dispatchers.IO) {
+            val bitmap = try {
+                val retriever = MediaMetadataRetriever()
+                retriever.setDataSource(context, track.uri)
+                val bytes = retriever.embeddedPicture
+                retriever.release()
+                bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+            } catch (e: Exception) {
+                null
+            }
+            _localArtwork.value = bitmap
+        }
+
         mediaPlayer?.release()
         mediaPlayer = MediaPlayer().apply {
             setDataSource(context, track.uri)
@@ -182,23 +155,44 @@ class MediaViewModel(application: Application) : AndroidViewModel(application) {
             setOnCompletionListener { localNext(context) }
         }
         _isLocalPlaying.value = true
-        // Load artwork asynchronously
-        viewModelScope.launch {
-            _localArtwork.value = loadArtworkForTrack(context, track)
+    }
+
+    fun addToLocalQueue(track: LocalTrack) {
+        if (mediaPlayer == null || !_isLocalPlaying.value) {
+            // Nothing playing — start playing this track
+            internalQueue = mutableListOf(track)
+            _localQueue.value = internalQueue.toList()
+            playLocalTrack(getApplication(), track, internalQueue)
+        } else {
+            // Add to end of queue
+            internalQueue.add(track)
+            _localQueue.value = internalQueue.toList()
         }
     }
 
+    fun removeFromLocalQueue(index: Int) {
+        if (index < 0 || index >= internalQueue.size) return
+        internalQueue.removeAt(index)
+        _localQueue.value = internalQueue.toList()
+        if (index < localIndex) localIndex--
+    }
+
+    fun clearLocalQueue() {
+        internalQueue.clear()
+        _localQueue.value = emptyList()
+    }
+
     fun localNext(context: Context) {
-        if (localQueue.isEmpty()) return
+        if (internalQueue.isEmpty()) return
         localIndex = if (isLocalShuffling) {
-            (0 until localQueue.size).random()
+            (0 until internalQueue.size).random()
         } else {
             when (localRepeatMode) {
                 2 -> localIndex
-                else -> (localIndex + 1) % localQueue.size
+                else -> (localIndex + 1) % internalQueue.size
             }
         }
-        playLocalTrack(context, localQueue[localIndex], localQueue)
+        playLocalTrack(context, internalQueue[localIndex], internalQueue)
     }
 
     fun localPreviousOrRestart(context: Context) {
@@ -208,14 +202,15 @@ class MediaViewModel(application: Application) : AndroidViewModel(application) {
                 return
             }
         }
-        if (localQueue.isEmpty()) return
+        if (internalQueue.isEmpty()) return
         localIndex = (localIndex - 1).coerceAtLeast(0)
-        playLocalTrack(context, localQueue[localIndex], localQueue)
+        playLocalTrack(context, internalQueue[localIndex], internalQueue)
     }
 
     fun seekToLocal(progress: Float) {
         mediaPlayer?.let {
-            it.seekTo((progress * it.duration).toInt())
+            val position = (progress * it.duration).toInt()
+            it.seekTo(position)
         }
     }
 
