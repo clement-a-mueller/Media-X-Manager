@@ -2,31 +2,49 @@ package com.example.mediaxmanager.ui.screens
 
 import android.graphics.Bitmap
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Cloud
+import androidx.compose.material.icons.rounded.Lyrics
+import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.palette.graphics.Palette
 import com.example.mediaxmanager.media.MediaViewModel
@@ -41,6 +59,7 @@ import com.example.mediaxmanager.ui.utils.formatDuration
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.foundation.clickable
+import kotlin.math.sin
 
 fun extractDominantColor(bitmap: Bitmap?): Color {
     if (bitmap == null) return Color(0xFF1C1B1F)
@@ -83,12 +102,12 @@ fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
     var showQueue by remember { mutableStateOf(false) }
     var seekPosition by remember { mutableStateOf<Float?>(null) }
     var useLocalMedia by remember { mutableStateOf(false) }
+    var lyricsMode by remember { mutableStateOf(false) }
 
     LaunchedEffect(isLocalPlaying) {
         if (isLocalPlaying) useLocalMedia = true
     }
 
-    // All display values driven by useLocalMedia as single source of truth
     val effectiveArtwork = if (useLocalMedia) localArtwork else state.artwork
     val effectiveTitle = if (useLocalMedia) (localTrack?.title ?: state.title) else state.title
     val effectiveArtist = if (useLocalMedia) (localTrack?.artist ?: state.artist) else state.artist
@@ -97,7 +116,6 @@ fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
     val effectiveDuration = state.duration
     val hasValidDuration = effectiveDuration > 0
 
-    // Queue: use local track list when in local mode, Spotify queue otherwise
     val effectiveQueue = if (useLocalMedia) {
         localQueue.map { QueueItem(title = it.title, artist = it.artist) }
     } else {
@@ -105,28 +123,35 @@ fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
     }
 
     val gesturesEnabled = remember { prefs.getBoolean("gestures_enabled", false) }
-    val lyricsEnabled = remember { prefs.getBoolean("lyrics_enabled", false) }
+    // Read on every recomposition so changes made in Settings are picked up immediately
+    val lyricsEnabled by remember { derivedStateOf { prefs.getBoolean("lyrics_enabled", false) } }
+    val karaokeEnabled by remember { derivedStateOf { prefs.getBoolean("karaoke_enabled", false) } }
+    val showTrackInfo by remember { derivedStateOf { prefs.getBoolean("show_track_info", true) } }
+    val showPlaybackControls by remember { derivedStateOf { prefs.getBoolean("show_playback_controls", true) } }
+    val showUpNext by remember { derivedStateOf { prefs.getBoolean("show_up_next", true) } }
+    val sliderStyle by remember { derivedStateOf { prefs.getString("player_slider_style", "wave") ?: "wave" } }
 
     var lyricsLines by remember { mutableStateOf<List<LyricsLine>>(emptyList()) }
 
     LaunchedEffect(effectiveTitle, effectiveArtist) {
         if (effectiveTitle.isEmpty() || !lyricsEnabled) return@LaunchedEffect
         lyricsLines = emptyList()
+        lyricsMode = false
         try {
             val encodedTitle = java.net.URLEncoder.encode(effectiveTitle, "UTF-8")
             val encodedArtist = java.net.URLEncoder.encode(effectiveArtist, "UTF-8")
             val url = "https://lrclib.net/api/get?track_name=$encodedTitle&artist_name=$encodedArtist"
-            val response = withContext(Dispatchers.IO) {
-                java.net.URL(url).readText()
-            }
+            val response = withContext(Dispatchers.IO) { java.net.URL(url).readText() }
             val json = org.json.JSONObject(response)
             val syncedLyrics = json.optString("syncedLyrics")
-            if (syncedLyrics.isNotEmpty()) {
-                lyricsLines = parseLrc(syncedLyrics)
-            }
+            if (syncedLyrics.isNotEmpty()) lyricsLines = parseLrc(syncedLyrics)
         } catch (e: Exception) {
             lyricsLines = emptyList()
         }
+    }
+
+    LaunchedEffect(lyricsLines) {
+        if (lyricsLines.isEmpty()) lyricsMode = false
     }
 
     val currentLineIndex = remember(effectivePosition, lyricsLines) {
@@ -137,9 +162,7 @@ fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
     val lyricsListState = rememberLazyListState()
     LaunchedEffect(currentLineIndex) {
         if (currentLineIndex >= 0) {
-            lyricsListState.animateScrollToItem(
-                index = (currentLineIndex - 2).coerceAtLeast(0)
-            )
+            lyricsListState.animateScrollToItem(index = (currentLineIndex - 2).coerceAtLeast(0))
         }
     }
 
@@ -159,13 +182,15 @@ fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
         AppStyle.GLASS   -> Color.Black
     }
 
+    // Whether the karaoke button should be visible
+    val showKaraokeButton = karaokeEnabled && lyricsEnabled && lyricsLines.isNotEmpty()
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .then(
                 if (gesturesEnabled) Modifier.pointerInput(useLocalMedia) {
-                    var totalX = 0f
-                    var totalY = 0f
+                    var totalX = 0f; var totalY = 0f
                     detectDragGestures(
                         onDragStart = { totalX = 0f; totalY = 0f },
                         onDrag = { change, dragAmount ->
@@ -178,33 +203,23 @@ fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
                             val absY = kotlin.math.abs(totalY)
                             if (absX > absY && absX > 100f) {
                                 if (totalX < 0 && !useLocalMedia) {
-                                    if (viewModel.mediaState.value.isPlaying) {
-                                        viewModel.playPause()
-                                        viewModel.spotifyWasPausedByUs = true
-                                    }
-                                    viewModel.resumeLocalMedia()
-                                    useLocalMedia = true
+                                    if (viewModel.mediaState.value.isPlaying) { viewModel.playPause(); viewModel.spotifyWasPausedByUs = true }
+                                    viewModel.resumeLocalMedia(); useLocalMedia = true
                                 } else if (totalX > 0 && useLocalMedia) {
                                     viewModel.suspendLocalMedia()
-                                    if (viewModel.spotifyWasPausedByUs) {
-                                        viewModel.playPause()
-                                        viewModel.spotifyWasPausedByUs = false
-                                    }
+                                    if (viewModel.spotifyWasPausedByUs) { viewModel.playPause(); viewModel.spotifyWasPausedByUs = false }
                                     useLocalMedia = false
                                 }
                             } else if (absY > absX && absY > 100f) {
-                                if (totalY < 0) {
-                                    if (useLocalMedia) viewModel.localNext(context) else viewModel.next()
-                                } else {
-                                    if (useLocalMedia) viewModel.localPreviousOrRestart(context) else viewModel.previous()
-                                }
+                                if (totalY < 0) { if (useLocalMedia) viewModel.localNext(context) else viewModel.next() }
+                                else { if (useLocalMedia) viewModel.localPreviousOrRestart(context) else viewModel.previous() }
                             }
                         }
                     )
                 } else Modifier
             )
     ) {
-        // Background
+        // ── Background ────────────────────────────────────────────────────────
         if (appStyle == AppStyle.GLASS && effectiveArtwork != null) {
             Image(
                 bitmap = effectiveArtwork.asImageBitmap(),
@@ -217,7 +232,6 @@ fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
         } else {
             Box(modifier = Modifier.fillMaxSize().background(backgroundColor))
         }
-
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -229,136 +243,202 @@ fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
                 Text("No media playing", style = MaterialTheme.typography.headlineMedium, color = Color.White)
             }
         } else {
-            Column(
-                modifier = Modifier.fillMaxSize().padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
+
+            // ── KARAOKE VIEW ──────────────────────────────────────────────────
+            AnimatedVisibility(
+                visible = lyricsMode,
+                enter = fadeIn(tween(400)),
+                exit = fadeOut(tween(400))
             ) {
-                AnimatedContent(
-                    targetState = effectiveArtwork,
-                    transitionSpec = { fadeIn(tween(800)) togetherWith fadeOut(tween(800)) },
-                    label = "artwork"
-                ) { artwork ->
-                    AlbumArt(bitmap = artwork, onClick = { showFullscreenArt = true })
-                }
-
-                Spacer(Modifier.height(32.dp))
-
-                AnimatedContent(
-                    targetState = effectiveTitle,
-                    transitionSpec = { fadeIn(tween(600)) togetherWith fadeOut(tween(600)) },
-                    label = "title"
-                ) {
-                    Text(it, style = MaterialTheme.typography.headlineLarge, color = Color.White)
-                }
-                AnimatedContent(
-                    targetState = effectiveArtist,
-                    transitionSpec = { fadeIn(tween(600)) togetherWith fadeOut(tween(600)) },
-                    label = "artist"
-                ) {
-                    Text(it, style = MaterialTheme.typography.bodyLarge, color = Color.White.copy(alpha = 0.7f))
-                }
-
-                val sleepTimerSeconds by viewModel.sleepTimerSeconds.collectAsStateWithLifecycle()
-                if (sleepTimerSeconds > 0) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "Sleep: %d:%02d".format(sleepTimerSeconds / 60, sleepTimerSeconds % 60),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.White.copy(alpha = 0.5f)
-                    )
-                }
-
-                Spacer(Modifier.height(16.dp))
-
-                if (appStyle == AppStyle.MINIMAL) {
-                    Slider(
-                        value = if (hasValidDuration) effectiveProgress else 0f,
-                        onValueChange = { if (hasValidDuration) seekPosition = it },
-                        onValueChangeFinished = {
-                            if (hasValidDuration) {
-                                seekPosition?.let {
-                                    if (currentUseLocalMedia) viewModel.seekToLocal(it)
-                                    else viewModel.seekTo(it)
-                                }
-                            }
-                            seekPosition = null
-                        },
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                        colors = SliderDefaults.colors(
-                            thumbColor = Color.White,
-                            activeTrackColor = Color.White,
-                            inactiveTrackColor = Color.White.copy(alpha = 0.3f)
-                        )
-                    )
-                } else {
-                    WaveSlider(
-                        value = if (hasValidDuration) effectiveProgress else 0f,
-                        onValueChange = { if (hasValidDuration) seekPosition = it },
-                        onValueChangeFinished = {
-                            if (hasValidDuration) {
-                                seekPosition?.let {
-                                    if (currentUseLocalMedia) viewModel.seekToLocal(it)
-                                    else viewModel.seekTo(it)
-                                }
-                            }
-                            seekPosition = null
-                        },
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        if (hasValidDuration) formatDuration(effectivePosition) else "--:--",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.White.copy(alpha = 0.6f)
-                    )
-                    Text(
-                        if (hasValidDuration) formatDuration(effectiveDuration) else "--:--",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.White.copy(alpha = 0.6f)
-                    )
-                }
-
-                Spacer(Modifier.height(16.dp))
-
-                PlaybackControls(
-                    isPlaying = state.isPlaying,
-                    isShuffling = state.isShuffling,
-                    repeatMode = state.repeatMode,
-                    onPlayPause = { if (useLocalMedia) viewModel.toggleLocalPlayPause() else viewModel.playPause() },
-                    onNext = { if (useLocalMedia) viewModel.localNext(context) else viewModel.next() },
-                    onPrevious = { if (useLocalMedia) viewModel.localPreviousOrRestart(context) else viewModel.previous() },
-                    onShuffle = { if (useLocalMedia) viewModel.toggleLocalShuffle() else viewModel.toggleShuffle() },
-                    onRepeat = { if (useLocalMedia) viewModel.toggleLocalRepeat() else viewModel.toggleRepeat() }
+                LyricsModeContent(
+                    lyricsLines = lyricsLines,
+                    currentLineIndex = currentLineIndex,
+                    listState = lyricsListState,
+                    title = effectiveTitle,
+                    artist = effectiveArtist,
+                    accentColor = dominantColor,
+                    onToggle = { lyricsMode = false }
                 )
+            }
 
-                Spacer(Modifier.height(8.dp))
+            // ── NORMAL PLAYER VIEW ────────────────────────────────────────────
+            AnimatedVisibility(
+                visible = !lyricsMode,
+                enter = fadeIn(tween(400)),
+                exit = fadeOut(tween(400))
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    if (showTrackInfo) {
+                        AnimatedContent(
+                            targetState = effectiveArtwork,
+                            transitionSpec = { fadeIn(tween(800)) togetherWith fadeOut(tween(800)) },
+                            label = "artwork"
+                        ) { artwork -> AlbumArt(bitmap = artwork, onClick = { showFullscreenArt = true }) }
 
-                TextButton(onClick = { showQueue = true }, enabled = !showQueue) {
-                    Text(
-                        "Up Next",
-                        color = if (showQueue) Color.White.copy(alpha = 0.3f) else Color.White.copy(alpha = 0.7f),
-                        style = MaterialTheme.typography.labelMedium
-                    )
-                }
+                        Spacer(Modifier.height(32.dp))
 
-                if (lyricsEnabled && lyricsLines.isNotEmpty() && currentLineIndex >= 0) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = lyricsLines[currentLineIndex].text,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(alpha = 0.5f),
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
-                    )
+                        AnimatedContent(
+                            targetState = effectiveTitle,
+                            transitionSpec = { fadeIn(tween(600)) togetherWith fadeOut(tween(600)) },
+                            label = "title"
+                        ) { Text(it, style = MaterialTheme.typography.headlineLarge, color = Color.White) }
+
+                        AnimatedContent(
+                            targetState = effectiveArtist,
+                            transitionSpec = { fadeIn(tween(600)) togetherWith fadeOut(tween(600)) },
+                            label = "artist"
+                        ) { Text(it, style = MaterialTheme.typography.bodyLarge, color = Color.White.copy(alpha = 0.7f)) }
+
+                        val sleepTimerSeconds by viewModel.sleepTimerSeconds.collectAsStateWithLifecycle()
+                        if (sleepTimerSeconds > 0) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "Sleep: %d:%02d".format(sleepTimerSeconds / 60, sleepTimerSeconds % 60),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White.copy(alpha = 0.5f)
+                            )
+                        }
+
+                        Spacer(Modifier.height(16.dp))
+                    } else {
+                        val sleepTimerSeconds by viewModel.sleepTimerSeconds.collectAsStateWithLifecycle()
+                        if (sleepTimerSeconds > 0) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "Sleep: %d:%02d".format(sleepTimerSeconds / 60, sleepTimerSeconds % 60),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White.copy(alpha = 0.5f)
+                            )
+                        }
+                        Spacer(Modifier.height(16.dp))
+                    }
+
+                    if (sliderStyle == "eq") {
+                        // EQ mode: animated vertical bars, no seek, no timestamps
+                        EqSlider(
+                            value = if (hasValidDuration) effectiveProgress else 0f,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
+                        )
+                    } else {
+                        // Wave or Minimal — both show timestamps
+                        if (sliderStyle == "minimal" || appStyle == AppStyle.MINIMAL) {
+                            Slider(
+                                value = if (hasValidDuration) effectiveProgress else 0f,
+                                onValueChange = { if (hasValidDuration) seekPosition = it },
+                                onValueChangeFinished = {
+                                    if (hasValidDuration) seekPosition?.let {
+                                        if (currentUseLocalMedia) viewModel.seekToLocal(it) else viewModel.seekTo(it)
+                                    }
+                                    seekPosition = null
+                                },
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                                colors = SliderDefaults.colors(
+                                    thumbColor = Color.White,
+                                    activeTrackColor = Color.White,
+                                    inactiveTrackColor = Color.White.copy(alpha = 0.3f)
+                                )
+                            )
+                        } else {
+                            WaveSlider(
+                                value = if (hasValidDuration) effectiveProgress else 0f,
+                                onValueChange = { if (hasValidDuration) seekPosition = it },
+                                onValueChangeFinished = {
+                                    if (hasValidDuration) seekPosition?.let {
+                                        if (currentUseLocalMedia) viewModel.seekToLocal(it) else viewModel.seekTo(it)
+                                    }
+                                    seekPosition = null
+                                },
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
+                            )
+                        }
+
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(
+                                if (hasValidDuration) formatDuration(effectivePosition) else "--:--",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White.copy(alpha = 0.6f)
+                            )
+                            Text(
+                                if (hasValidDuration) formatDuration(effectiveDuration) else "--:--",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White.copy(alpha = 0.6f)
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+
+                    if (showPlaybackControls) {
+                        PlaybackControls(
+                            isPlaying = state.isPlaying,
+                            isShuffling = state.isShuffling,
+                            repeatMode = state.repeatMode,
+                            onPlayPause = { if (useLocalMedia) viewModel.toggleLocalPlayPause() else viewModel.playPause() },
+                            onNext = { if (useLocalMedia) viewModel.localNext(context) else viewModel.next() },
+                            onPrevious = { if (useLocalMedia) viewModel.localPreviousOrRestart(context) else viewModel.previous() },
+                            onShuffle = { if (useLocalMedia) viewModel.toggleLocalShuffle() else viewModel.toggleShuffle() },
+                            onRepeat = { if (useLocalMedia) viewModel.toggleLocalRepeat() else viewModel.toggleRepeat() }
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    }
+
+                    if (showUpNext) {
+                        TextButton(onClick = { showQueue = true }, enabled = !showQueue) {
+                            Text(
+                                "Up Next",
+                                color = if (showQueue) Color.White.copy(alpha = 0.3f) else Color.White.copy(alpha = 0.7f),
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
+                    }
+
+                    if (lyricsEnabled && lyricsLines.isNotEmpty() && currentLineIndex >= 0) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = lyricsLines[currentLineIndex].text,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White.copy(alpha = 0.5f),
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                        )
+                    }
                 }
             }
 
+            // ── KARAOKE ENTRY BUTTON (normal player view only) ────────────────
+            if (showKaraokeButton && !lyricsMode) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        .padding(top = 8.dp, end = 16.dp),
+                    contentAlignment = Alignment.TopEnd
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(Color.White.copy(alpha = 0.12f))
+                            .clickable { lyricsMode = true }
+                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Lyrics,
+                            contentDescription = "Karaoke mode",
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text("Karaoke", style = MaterialTheme.typography.labelSmall, color = Color.White)
+                    }
+                }
+            }
+
+            // ── SOURCE SWITCH ─────────────────────────────────────────────────
             Box(
                 modifier = Modifier.fillMaxSize().padding(end = 20.dp, bottom = 32.dp),
                 contentAlignment = Alignment.BottomEnd
@@ -368,17 +448,11 @@ fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
                     enabled = localTrack != null || useLocalMedia,
                     onCheckedChange = { switchToLocal ->
                         if (switchToLocal) {
-                            if (viewModel.mediaState.value.isPlaying) {
-                                viewModel.playPause()
-                                viewModel.spotifyWasPausedByUs = true
-                            }
+                            if (viewModel.mediaState.value.isPlaying) { viewModel.playPause(); viewModel.spotifyWasPausedByUs = true }
                             viewModel.resumeLocalMedia()
                         } else {
                             viewModel.suspendLocalMedia()
-                            if (viewModel.spotifyWasPausedByUs) {
-                                viewModel.playPause()
-                                viewModel.spotifyWasPausedByUs = false
-                            }
+                            if (viewModel.spotifyWasPausedByUs) { viewModel.playPause(); viewModel.spotifyWasPausedByUs = false }
                         }
                         useLocalMedia = switchToLocal
                     }
@@ -387,17 +461,8 @@ fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
         }
 
         if (showQueue) {
-            // Scrim — catches taps outside the sheet to dismiss it
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.4f))
-                    .clickable { showQueue = false }
-            )
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.BottomCenter
-            ) {
+            Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f)).clickable { showQueue = false })
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
                 QueueSheet(
                     queue = effectiveQueue,
                     currentTitle = effectiveTitle,
@@ -418,6 +483,184 @@ fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// EQ-style slider: animated vertical bars that follow playback position
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun EqSlider(
+    value: Float,
+    modifier: Modifier = Modifier,
+    activeColor: Color = Color.White,
+    inactiveColor: Color = Color.White.copy(alpha = 0.15f),
+    barCount: Int = 40
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "eq")
+
+    // Each bar gets its own phase offset so they don't all move together
+    val phases = remember(barCount) { List(barCount) { it.toFloat() / barCount } }
+
+    // One animated float drives time; individual bar heights derived from it + phase
+    val time by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "eqTime"
+    )
+
+    val animatedValue by animateFloatAsState(
+        targetValue = value,
+        animationSpec = tween(200),
+        label = "eqProgress"
+    )
+
+    Canvas(modifier = modifier.height(48.dp)) {
+        val barWidth = (size.width / barCount) * 0.55f
+        val gap = (size.width / barCount) * 0.45f
+        val maxBarHeight = size.height * 0.9f
+        val minBarHeight = size.height * 0.08f
+        val progressX = size.width * animatedValue
+
+        for (i in 0 until barCount) {
+            val x = i * (barWidth + gap) + gap / 2f
+            val centerX = x + barWidth / 2f
+            val isActive = centerX <= progressX
+
+            // Height driven by a mix of two sine waves per bar for organic movement
+            val phase = phases[i]
+            val h1 = sin((time + phase) * 2f * kotlin.math.PI.toFloat())
+            val h2 = sin((time * 1.7f + phase * 1.3f) * 2f * kotlin.math.PI.toFloat())
+            val normalised = ((h1 * 0.6f + h2 * 0.4f) + 1f) / 2f  // 0..1
+
+            val barHeight = if (isActive) {
+                minBarHeight + normalised * (maxBarHeight - minBarHeight)
+            } else {
+                minBarHeight + normalised * (maxBarHeight - minBarHeight) * 0.25f
+            }
+
+            val top = (size.height - barHeight) / 2f
+            drawRoundRect(
+                color = if (isActive) activeColor else inactiveColor,
+                topLeft = androidx.compose.ui.geometry.Offset(x, top),
+                size = androidx.compose.ui.geometry.Size(barWidth, barHeight),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2f)
+            )
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Full-screen karaoke composable
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun LyricsModeContent(
+    lyricsLines: List<LyricsLine>,
+    currentLineIndex: Int,
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    title: String,
+    artist: String,
+    accentColor: Color,
+    onToggle: () -> Unit
+) {
+    val highlightColor = remember(accentColor) {
+        Color(
+            red = (accentColor.red + 0.55f).coerceAtMost(1f),
+            green = (accentColor.green + 0.55f).coerceAtMost(1f),
+            blue = (accentColor.blue + 0.55f).coerceAtMost(1f),
+            alpha = 1f
+        )
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        androidx.compose.foundation.lazy.LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp),
+            contentPadding = PaddingValues(top = 120.dp, bottom = 160.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            itemsIndexed(lyricsLines) { index, line ->
+                val isCurrent = index == currentLineIndex
+                val isPast = index < currentLineIndex
+                AnimatedContent(
+                    targetState = isCurrent,
+                    transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(300)) },
+                    label = "lyric_$index"
+                ) { current ->
+                    Text(
+                        text = line.text,
+                        style = MaterialTheme.typography.bodyLarge.copy(
+                            fontSize = if (current) 24.sp else 18.sp,
+                            fontWeight = if (current) FontWeight.Bold else FontWeight.Normal,
+                            lineHeight = if (current) 32.sp else 26.sp
+                        ),
+                        color = when {
+                            current -> highlightColor
+                            isPast  -> Color.White.copy(alpha = 0.35f)
+                            else    -> Color.White.copy(alpha = 0.55f)
+                        },
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                    )
+                }
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(160.dp)
+                .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.85f), Color.Transparent)))
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .align(Alignment.TopStart),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f).padding(start = 16.dp)) {
+                Text(title, style = MaterialTheme.typography.titleMedium, color = Color.White, fontWeight = FontWeight.SemiBold)
+                Text(artist, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.6f))
+            }
+            Spacer(Modifier.width(8.dp))
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color.White.copy(alpha = 0.25f))
+                    .clickable { onToggle() }
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.MusicNote,
+                    contentDescription = "Back to player",
+                    tint = Color.White,
+                    modifier = Modifier.size(16.dp)
+                )
+                Text("Player", style = MaterialTheme.typography.labelSmall, color = Color.White)
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(120.dp)
+                .align(Alignment.BottomCenter)
+                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))))
+        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Source switch
+// ─────────────────────────────────────────────────────────────────────────────
+
 @Composable
 private fun SourceSwitch(
     useLocalMedia: Boolean,
@@ -426,13 +669,11 @@ private fun SourceSwitch(
 ) {
     val trackColor by animateColorAsState(
         targetValue = if (useLocalMedia) LocalModeTrackColor else Color.White.copy(alpha = 0.15f),
-        animationSpec = tween(300),
-        label = "switchTrack"
+        animationSpec = tween(300), label = "switchTrack"
     )
     val trackColorDisabled by animateColorAsState(
         targetValue = if (useLocalMedia) LocalModeTrackColorDim else Color.White.copy(alpha = 0.08f),
-        animationSpec = tween(300),
-        label = "switchTrackDim"
+        animationSpec = tween(300), label = "switchTrackDim"
     )
     Switch(
         checked = useLocalMedia,

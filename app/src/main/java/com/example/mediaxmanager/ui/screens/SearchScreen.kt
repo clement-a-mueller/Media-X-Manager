@@ -40,6 +40,8 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
 import java.io.File
 import com.example.mediaxmanager.media.MediaViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.mediaxmanager.ui.theme.AppStyle
 
 val AUDIO_EXTENSIONS = setOf("mp3", "flac", "ogg", "m4a", "wav", "aac", "opus", "wma", "aiff")
 
@@ -56,8 +58,23 @@ data class LocalTrack(
 object TrackCache {
     var tracks: List<LocalTrack> = emptyList()
     var lastLoadTime: Long = 0L
+    var metadataLoaded: Boolean = false
+    var lastMetadataLoadTime: Long = 0L
     val artCache = mutableMapOf<String, Bitmap?>()
     val artistCache = mutableMapOf<String, String?>()
+}
+
+suspend fun preloadAllMetadata(context: Context, tracks: List<LocalTrack>) = withContext(Dispatchers.IO) {
+    tracks.map { track ->
+        async {
+            val key = track.uri.toString().ifBlank { track.path }
+            if (!TrackCache.artCache.containsKey(key)) {
+                getMetadataForTrack(context, track)
+            }
+        }
+    }.awaitAll()
+    TrackCache.metadataLoaded = true
+    TrackCache.lastMetadataLoadTime = System.currentTimeMillis()
 }
 
 suspend fun queryLocalTracks(context: Context): List<LocalTrack> = withContext(Dispatchers.IO) {
@@ -232,14 +249,17 @@ fun formatDuration(ms: Long): String {
 
 // ─── Root screen ──────────────────────────────────────────────────────────────
 @Composable
-fun SearchScreen(viewModel: MediaViewModel) {
+fun SearchScreen(
+    viewModel: MediaViewModel,
+    appStyle: AppStyle = AppStyle.DYNAMIC,
+    dominantColor: Color = Color(0xFF1C1B1F)
+) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("settings", Context.MODE_PRIVATE) }
     var query by remember { mutableStateOf("") }
     var allTracks by remember { mutableStateOf(TrackCache.tracks) }
     var isLoading by remember { mutableStateOf(false) }
     var browserPath by remember { mutableStateOf<String?>(null) }
-
     var starredFolders by remember {
         mutableStateOf(
             prefs.getString("starred_folders", "")
@@ -256,15 +276,21 @@ fun SearchScreen(viewModel: MediaViewModel) {
     LaunchedEffect(Unit) {
         val refreshMinutes = prefs.getInt("search_refresh_minutes", -1)
         val now = System.currentTimeMillis()
-        val shouldRefresh = TrackCache.tracks.isEmpty() ||
+        val shouldRefreshTracks = TrackCache.tracks.isEmpty() ||
                 (refreshMinutes > 0 && now - TrackCache.lastLoadTime > refreshMinutes * 60 * 1000L)
-        if (shouldRefresh) {
+        if (shouldRefreshTracks) {
             isLoading = true
             TrackCache.tracks = queryLocalTracks(context)
             TrackCache.lastLoadTime = now
+            TrackCache.metadataLoaded = false
             isLoading = false
         }
         allTracks = TrackCache.tracks
+        val shouldRefreshMetadata = !TrackCache.metadataLoaded ||
+                (refreshMinutes > 0 && now - TrackCache.lastMetadataLoadTime > refreshMinutes * 60 * 1000L)
+        if (shouldRefreshMetadata) {
+            preloadAllMetadata(context, TrackCache.tracks)
+        }
     }
 
     val filteredTracks = remember(query, allTracks) {
@@ -276,18 +302,47 @@ fun SearchScreen(viewModel: MediaViewModel) {
         }
     }
 
+    // Background color matching HomeScreen logic
+    val minimalColor = remember { Color(prefs.getInt("minimal_color", 0xFF2C2C2C.toInt())) }
+    val backgroundColor = when (appStyle) {
+        AppStyle.DYNAMIC -> dominantColor
+        AppStyle.AMOLED  -> Color.Black
+        AppStyle.GLASS   -> Color.Black
+        AppStyle.MINIMAL -> resolveSecondaryBackground(appStyle, minimalColor)
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0A0A0A))
+            .background(backgroundColor)
             .statusBarsPadding()
             .padding(horizontal = 16.dp)
     ) {
+        // Glass background image layer
+        if (appStyle == AppStyle.GLASS) {
+            val localArtwork by viewModel.localArtwork.collectAsStateWithLifecycle()
+            val combinedState by viewModel.combinedMediaState.collectAsStateWithLifecycle()
+            val artwork = localArtwork ?: combinedState.artwork
+            if (artwork != null) {
+                androidx.compose.foundation.Image(
+                    bitmap = artwork.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                    alpha = 0.4f
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.5f))
+                )
+            }
+        }
+
         Column {
             Spacer(Modifier.height(24.dp))
             Text("Search", style = MaterialTheme.typography.headlineLarge, color = Color.White)
             Spacer(Modifier.height(16.dp))
-
             // Spotify button
             Row(
                 modifier = Modifier
@@ -306,9 +361,7 @@ fun SearchScreen(viewModel: MediaViewModel) {
             ) {
                 Text("Open Spotify", style = MaterialTheme.typography.bodyLarge, color = Color.White)
             }
-
             Spacer(Modifier.height(12.dp))
-
             // Browse Folders button
             Row(
                 modifier = Modifier
@@ -329,9 +382,7 @@ fun SearchScreen(viewModel: MediaViewModel) {
                 Spacer(Modifier.width(8.dp))
                 Text("Browse Folders", style = MaterialTheme.typography.bodyLarge, color = Color.White)
             }
-
             Spacer(Modifier.height(20.dp))
-
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
@@ -350,9 +401,7 @@ fun SearchScreen(viewModel: MediaViewModel) {
                 ),
                 shape = RoundedCornerShape(12.dp)
             )
-
             Spacer(Modifier.height(12.dp))
-
             if (isLoading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = Color.White)
@@ -419,7 +468,6 @@ fun SearchScreen(viewModel: MediaViewModel) {
                 }
             }
         }
-
         // Folder browser overlay
         if (browserPath != null) {
             FolderBrowserScreen(
@@ -841,9 +889,17 @@ fun TrackRow(
     var showMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(trackKey) {
-        val (bitmap, artist) = getMetadataForTrack(context, track)
-        art = bitmap
-        if (!artist.isNullOrBlank()) artistName = artist
+        val key = track.uri.toString().ifBlank { track.path }
+        if (TrackCache.artCache.containsKey(key) && TrackCache.artistCache.containsKey(key)) {
+            // Already cached — read directly without launching coroutine work
+            art = TrackCache.artCache[key]
+            val cachedArtist = TrackCache.artistCache[key]
+            if (!cachedArtist.isNullOrBlank()) artistName = cachedArtist
+        } else {
+            val (bitmap, artist) = getMetadataForTrack(context, track)
+            art = bitmap
+            if (!artist.isNullOrBlank()) artistName = artist
+        }
     }
 
     Box {

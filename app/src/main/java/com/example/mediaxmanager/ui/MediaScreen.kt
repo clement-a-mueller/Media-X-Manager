@@ -34,9 +34,12 @@ sealed class Screen {
 fun MediaScreen(viewModel: MediaViewModel) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("settings", Context.MODE_PRIVATE) }
-    val state by viewModel.mediaState.collectAsStateWithLifecycle()
-    var selectedScreen by remember { mutableStateOf<Screen>(Screen.Home) }
 
+    val state by viewModel.combinedMediaState.collectAsStateWithLifecycle()
+    val localArtwork by viewModel.localArtwork.collectAsStateWithLifecycle()
+    val isLocalPlaying by viewModel.isLocalPlaying.collectAsStateWithLifecycle()
+
+    var selectedScreen by remember { mutableStateOf<Screen>(Screen.Home) }
     var appStyle by remember {
         mutableStateOf(
             try {
@@ -51,18 +54,25 @@ fun MediaScreen(viewModel: MediaViewModel) {
     }
 
     val selectedIndex = when (selectedScreen) {
-        is Screen.Home -> 0
-        is Screen.Search -> 1
+        is Screen.Home     -> 0
+        is Screen.Search   -> 1
         is Screen.Settings -> 2
     }
 
-    val dominantColor = remember(state.artwork) { extractDominantColor(state.artwork) }
+    // Use whichever artwork is currently active so all screens stay in sync
+    val activeArtwork = if (isLocalPlaying) localArtwork else state.artwork
+    val dominantColor = remember(activeArtwork) { extractDominantColor(activeArtwork) }
+    val animatedDominantColor by animateColorAsState(
+        targetValue = dominantColor,
+        animationSpec = tween(800),
+        label = "dominantColor"
+    )
+
+    // Navbar color: dynamic mode follows dominant color; all others go black
     val navBarColor by animateColorAsState(
-        targetValue = when {
-            selectedScreen is Screen.Settings -> Color(0xFF000000)
-            selectedScreen is Screen.Search -> Color(0xFF000000)
-            appStyle == AppStyle.DYNAMIC -> dominantColor.copy(alpha = 0.85f)
-            else -> Color(0xFF000000)
+        targetValue = when (appStyle) {
+            AppStyle.DYNAMIC -> animatedDominantColor.copy(alpha = 0.85f)
+            else             -> Color(0xFF000000)
         },
         animationSpec = tween(800),
         label = "navColor"
@@ -70,16 +80,17 @@ fun MediaScreen(viewModel: MediaViewModel) {
 
     val content: @Composable () -> Unit = {
         when (selectedScreen) {
-            is Screen.Home -> HomeScreen(viewModel, appStyle)
-            // Pass viewModel so TrackRow clicks play through HomeScreen's local player
-            is Screen.Search -> SearchScreen(viewModel)
+            is Screen.Home     -> HomeScreen(viewModel, appStyle)
+            is Screen.Search   -> SearchScreen(viewModel, appStyle, animatedDominantColor)
             is Screen.Settings -> SettingsScreen(
                 currentStyle = appStyle,
                 onStyleChange = { newStyle ->
                     appStyle = newStyle
                     prefs.edit().putString("style", newStyle.name).apply()
                 },
-                viewModel = viewModel
+                viewModel = viewModel,
+                appStyle = appStyle,
+                dominantColor = animatedDominantColor
             )
         }
     }
@@ -97,11 +108,7 @@ fun MediaScreen(viewModel: MediaViewModel) {
         }
     } else {
         Box(modifier = Modifier.fillMaxSize()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(bottom = 80.dp)
-            ) {
+            Box(modifier = Modifier.fillMaxSize().padding(bottom = 80.dp)) {
                 content()
             }
             NavigationBar(

@@ -43,7 +43,7 @@ class MediaViewModel(application: Application) : AndroidViewModel(application) {
 
     // Combined state
     val combinedMediaState = combine(mediaState, _isLocalPlaying, _localTrack) { state, isLocal, track ->
-        if (isLocal && track != null) {
+        if (track != null && (isLocal || !state.isConnected)) {
             state.copy(
                 title = track.title,
                 artist = track.artist,
