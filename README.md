@@ -1,5 +1,5 @@
 ## ⬇️ Download
-[![Download](https://img.shields.io/badge/Download-Latest%20APK-brightgreen?style=for-the-badge&logo=github)](https://github.com/clement-mueller/Media-X-Manager/releases/latest)
+[![Download](https://img.shields.io/badge/Download-Latest%20APK-brightgreen?style=for-the-badge&logo=github)](https://github.com/clement-a-mueller/Media-X-Manager/releases/latest)
 
 # 🎵 Media X Manager
 
