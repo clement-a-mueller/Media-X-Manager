@@ -3,7 +3,7 @@
 
 # 🎵 Media X Manager
 
-A sleek Android media controller app built with **Jetpack Compose** and **Material 3**. Control any media playing on your device — music, podcasts, videos — from a single beautiful interface.
+A sleek Android media controller app built with **Jetpack Compose** and **Material 3**. Control any media playing on your device — music, podcasts — from a single beautiful interface.
 
 ---
 
