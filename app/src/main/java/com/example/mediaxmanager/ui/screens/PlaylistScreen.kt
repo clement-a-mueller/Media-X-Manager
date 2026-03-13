@@ -201,11 +201,10 @@ fun PlaylistDetailScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .clickable(enabled = false, onClick = {})
             .background(bgColor)
     ) {
         Column {
-            Spacer(Modifier.statusBarsPadding())
-
             // ── Hero header ───────────────────────────────────────────────────
             Box(
                 modifier = Modifier
@@ -237,6 +236,7 @@ fun PlaylistDetailScreen(
                     onClick  = onBack,
                     modifier = Modifier
                         .align(Alignment.TopStart)
+                        .statusBarsPadding()
                         .padding(8.dp)
                         .clip(CircleShape)
                         .background(Color.Black.copy(alpha = 0.28f))

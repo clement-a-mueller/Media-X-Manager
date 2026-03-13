@@ -11,6 +11,8 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.mediaxmanager.ui.screens.TrackCache
 import fi.iki.elonen.NanoHTTPD
+import fi.iki.elonen.NanoHTTPD.Method
+import org.json.JSONObject
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -48,6 +50,7 @@ class MediaHttpServer(
         return when {
             uri == "/tracks"              -> handleTracks()
             uri == "/now-playing"         -> handleNowPlaying()
+            uri == "/volume"              -> handleVolume(session)
             uri.startsWith("/stream/")    -> handleStream(uri.removePrefix("/stream/"))
             uri.startsWith("/art/")       -> handleArt(uri.removePrefix("/art/"))
             uri.startsWith("/command/")   -> handleCommand(uri.removePrefix("/command/"), session)
@@ -85,6 +88,44 @@ class MediaHttpServer(
             """{"id":null,"isPlaying":false,"position":0,"duration":0}"""
         }
         return newFixedLengthResponse(Response.Status.OK, "application/json", json)
+    }
+
+    private fun handleVolume(session: IHTTPSession): Response {
+        val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+
+        // POST: Linux client pushes a new manual volume back to the phone
+        if (session.method == Method.POST) {
+            return try {
+                val body = mutableMapOf<String, String>()
+                session.parseBody(body)
+                val raw    = body["postData"] ?: body.values.firstOrNull() ?: "{}"
+                val parsed = org.json.JSONObject(raw)
+                val vol    = parsed.optInt("volume", -1)
+                if (vol in 0..100) {
+                    prefs.edit()
+                        .putInt("pc_manual_volume", vol)
+                        .putBoolean("pc_volume_sync", false)
+                        .apply()
+                    newFixedLengthResponse(Response.Status.OK, "application/json", """{"ok":true}""")
+                } else {
+                    newFixedLengthResponse(Response.Status.BAD_REQUEST, MIME_PLAINTEXT, "Bad volume")
+                }
+            } catch (e: Exception) {
+                newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Parse error")
+            }
+        }
+
+        // GET: return current effective volume (phone media stream or manual)
+        val syncEnabled = prefs.getBoolean("pc_volume_sync", true)
+        val volume: Int = if (syncEnabled) {
+            val am      = context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+            val current = am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+            val max     = am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+            if (max > 0) (current * 100 / max) else 80
+        } else {
+            prefs.getInt("pc_manual_volume", 80)
+        }
+        return newFixedLengthResponse(Response.Status.OK, "application/json", """{"volume":$volume}""")
     }
 
     private fun handleStream(trackId: String): Response {

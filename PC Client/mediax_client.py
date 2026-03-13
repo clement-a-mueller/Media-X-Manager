@@ -113,6 +113,16 @@ class MediaXClient:
     def stream_url(self, track_id: str) -> str:
         return f"{self.base}/stream/{track_id}"
 
+    def get_volume(self) -> int | None:
+        """Fetch the current volume (0–100) from the phone."""
+        try:
+            r = requests.get(f"{self.base}/volume", timeout=CONNECT_TIMEOUT)
+            if r.ok:
+                return r.json().get("volume")
+        except Exception:
+            pass
+        return None
+
 
 # ─── Player (mpv IPC) ─────────────────────────────────────────────────────────
 
@@ -128,17 +138,24 @@ class Player:
         self._ipc_path   = os.path.join(tempfile.gettempdir(), "mediax_mpv.sock")
         self.current_id  = None
         self._paused     = False
+        self._volume     = 100  # start at full unity gain; bar drags down
 
     # ── IPC helpers ───────────────────────────────────────────────────────────
 
     def _send_ipc(self, command: list) -> bool:
-        """Send a JSON command to mpv's IPC socket. Returns True on success."""
+        """Send a JSON command to mpv's IPC socket and confirm it was processed."""
         try:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
                 s.settimeout(1.0)
                 s.connect(self._ipc_path)
                 msg = json.dumps({"command": command}) + "\n"
                 s.sendall(msg.encode())
+                # Read the response so mpv has fully processed the command
+                # before we return. Ignore the content; any response = success.
+                try:
+                    s.recv(4096)
+                except Exception:
+                    pass
             print(f"[IPC OK] {command}")
             return True
         except Exception as e:
@@ -192,6 +209,7 @@ class Player:
                     "--no-video",
                     "--really-quiet",
                     f"--input-ipc-server={self._ipc_path}",
+                    f"--volume={self._volume}",
                     url,
                 ],
                 stdout=subprocess.DEVNULL,
@@ -226,6 +244,15 @@ class Player:
     def seek_to_ms(self, position_ms: float):
         """Seek to an absolute position in milliseconds."""
         self._send_ipc(["seek", round(position_ms / 1000.0, 2), "absolute"])
+
+    def set_volume(self, volume: int):
+        """Set mpv's internal software volume (0–100) via IPC.
+        Does NOT touch PulseAudio/system volume at all."""
+        self._volume = max(0, min(100, volume))
+        self._send_ipc(["set_property", "volume", self._volume])
+
+    def get_volume(self) -> int:
+        return self._volume
 
     def get_position_sec(self) -> float | None:
         """Ask mpv for its current playback position in seconds via IPC."""
@@ -267,12 +294,15 @@ class Player:
 # ─── Poller ───────────────────────────────────────────────────────────────────
 
 class PlaybackPoller:
-    def __init__(self, client, player, on_update, on_lost):
-        self._client    = client
-        self._player    = player
-        self._on_update = on_update
-        self._on_lost   = on_lost
-        self._stop_evt  = threading.Event()
+    def __init__(self, client, player, on_update, on_lost, on_volume=None):
+        self._client       = client
+        self._player       = player
+        self._on_update    = on_update
+        self._on_lost      = on_lost
+        self._on_volume    = on_volume
+        self._stop_evt     = threading.Event()
+        self._last_volume  = -1
+        self._vol_tick     = 0
 
     def start(self):
         threading.Thread(target=self._loop, daemon=True).start()
@@ -342,6 +372,18 @@ class PlaybackPoller:
                         print("[PAUSE] Android paused, pausing mpv")
                         self._player.pause()
 
+                # ── Volume sync (every 3 polls ≈ 3 s) ────────────────────────
+                self._vol_tick += 1
+                if self._vol_tick >= 3:
+                    self._vol_tick = 0
+                    vol = self._client.get_volume()
+                    if vol is not None and vol != self._last_volume:
+                        print(f"[VOL] {self._last_volume} → {vol}")
+                        self._player.set_volume(vol)
+                        self._last_volume = vol
+                        if self._on_volume:
+                            self._on_volume(vol)
+
             self._stop_evt.wait(POLL_INTERVAL)
 
     def _seek_after_ready(self, position_ms: float):
@@ -364,15 +406,16 @@ class App(tk.Tk):
         self.configure(bg=BG)
         self.resizable(False, False)
 
-        self._host    = host
-        self._client  = None
-        self._player  = Player()
-        self._poller  = None
-        self._art_ref = None
-        self._last_id = None
+        self._host     = host
+        self._client   = None
+        self._player   = Player()
+        self._poller   = None
+        self._art_ref  = None
+        self._last_id  = None
 
         self._build_ui()
         self._do_connect(host)
+        self._poll_app_volume()
 
     def _build_ui(self):
         # ── top bar ──────────────────────────────────────────────────────────
@@ -426,6 +469,74 @@ class App(tk.Tk):
         self._art_lbl.pack(side="left", padx=(0, 12))
         info.pack(side="left", fill="both", expand=True)
 
+        # ── volume bar (sibling of card, shown/hidden together) ───────────────
+        self._vol_frame = tk.Frame(self, bg=BG, padx=12)
+
+        self._vol_icon = tk.Label(self._vol_frame, text="🔊", font=("Helvetica", 9),
+                                  fg=MUTED, bg=BG)
+        self._vol_icon.pack(side="left", padx=(0, 6))
+
+        self._vol_canvas = tk.Canvas(self._vol_frame, height=4, bg=BG3,
+                                     highlightthickness=0, bd=0)
+        self._vol_canvas.pack(side="left", fill="x", expand=True)
+        self._vol_canvas.bind("<Configure>", lambda e: self._redraw_vol())
+        self._vol_canvas.bind("<Button-1>",  self._on_vol_click)
+        self._vol_canvas.bind("<B1-Motion>", self._on_vol_click)
+
+        self._vol_pct_lbl = tk.Label(self._vol_frame, text="100%",
+                                     font=("Helvetica", 9), fg=MUTED, bg=BG, width=4)
+        self._vol_pct_lbl.pack(side="left", padx=(6, 0))
+
+    # ── Volume helpers ────────────────────────────────────────────────────────
+
+    def _poll_app_volume(self):
+        """Keep the bar in sync with mpv's stored volume level."""
+        self._update_vol_ui(self._player.get_volume())
+        self.after(500, self._poll_app_volume)
+
+    def _adjust_volume(self, delta: int):
+        vol = max(0, min(100, self._player.get_volume() + delta))
+        self._player.set_volume(vol)
+        self._update_vol_ui(vol)
+
+    def _redraw_vol(self):
+        w = self._vol_canvas.winfo_width()
+        if w < 2:
+            return
+        vol = self._player.get_volume()
+        self._vol_canvas.delete("all")
+        fill_w = max(0, int(w * vol / 100))
+        self._vol_canvas.create_rectangle(0, 0, w,      4, fill=BG3,    outline="")
+        self._vol_canvas.create_rectangle(0, 0, fill_w, 4, fill=ACCENT, outline="")
+    def _on_vol_click(self, event):
+        w = self._vol_canvas.winfo_width()
+        if w < 1:
+            return
+        vol = max(0, min(100, int(event.x * 100 / w)))
+        self._player.set_volume(vol)
+        self._update_vol_ui(vol)
+
+    def _update_vol_ui(self, vol: int):
+        icon = "🔇" if vol == 0 else "🔉" if vol < 50 else "🔊"
+        self._vol_icon.config(text=icon)
+        self._vol_pct_lbl.config(text=f"{vol}%")
+        w = self._vol_canvas.winfo_width()
+        if w < 2:
+            return
+        self._vol_canvas.delete("all")
+        fill_w = max(0, int(w * vol / 100))
+        self._vol_canvas.create_rectangle(0, 0, w,      4, fill=BG3,    outline="")
+        self._vol_canvas.create_rectangle(0, 0, fill_w, 4, fill=ACCENT, outline="")
+
+    def _sync_volume_from_phone(self):
+        """On connect: seed mpv volume from the phone setting."""
+        if self._client:
+            vol = self._client.get_volume()
+            if vol is not None:
+                self._player._volume = vol
+                self._player.set_volume(vol)
+                self.after(0, lambda: self._update_vol_ui(vol))
+
     # ── Connection ────────────────────────────────────────────────────────────
 
     def _do_connect(self, host: str):
@@ -437,13 +548,20 @@ class App(tk.Tk):
 
     def _on_connected(self):
         self._set_status(f"Connected · {self._host}:{DEFAULT_PORT}", GREEN, GREEN)
+        # Set initial mpv volume to match phone setting
+        threading.Thread(target=self._sync_volume_from_phone, daemon=True).start()
         self._poller = PlaybackPoller(
-            client    = self._client,
-            player    = self._player,
-            on_update = lambda info: self.after(0, lambda: self._apply(info)),
-            on_lost   = lambda: self.after(0, self._on_lost),
+            client     = self._client,
+            player     = self._player,
+            on_update  = lambda info: self.after(0, lambda: self._apply(info)),
+            on_lost    = lambda: self.after(0, self._on_lost),
+            on_volume  = lambda vol: self.after(0, lambda: self._on_volume_from_phone(vol)),
         )
         self._poller.start()
+
+    def _on_volume_from_phone(self, vol: int):
+        self._player.set_volume(vol)
+        self._update_vol_ui(vol)
 
     def _on_failed(self):
         self._set_status("Cannot reach device — check IP and that the app is open", RED, RED)
@@ -520,12 +638,14 @@ class App(tk.Tk):
 
     def _show_card(self):
         if not self._card.winfo_ismapped():
-            self._card.pack(fill="x", padx=12, pady=(10, 12))
-            self.geometry("400x220")
+            self._card.pack(fill="x", padx=12, pady=(10, 4))
+            self._vol_frame.pack(fill="x", pady=(0, 10))
+            self.geometry("400x250")
 
     def _hide_card(self):
         if self._card.winfo_ismapped():
             self._card.pack_forget()
+            self._vol_frame.pack_forget()
             self.geometry("400x160")
 
     def _set_status(self, text: str, fg: str, dot: str):
