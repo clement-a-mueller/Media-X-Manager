@@ -17,7 +17,9 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -47,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.palette.graphics.Palette
+import com.example.mediaxmanager.media.LyricsLine
 import com.example.mediaxmanager.media.MediaViewModel
 import com.example.mediaxmanager.media.QueueItem
 import com.example.mediaxmanager.ui.components.AlbumArt
@@ -56,10 +59,11 @@ import com.example.mediaxmanager.ui.components.QueueSheet
 import com.example.mediaxmanager.ui.components.WaveSlider
 import com.example.mediaxmanager.ui.theme.AppStyle
 import com.example.mediaxmanager.ui.utils.formatDuration
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import androidx.compose.foundation.clickable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import kotlin.math.sin
+import kotlinx.coroutines.delay
 
 fun extractDominantColor(bitmap: Bitmap?): Color {
     if (bitmap == null) return Color(0xFF1C1B1F)
@@ -70,51 +74,57 @@ fun extractDominantColor(bitmap: Bitmap?): Color {
     return Color(argb)
 }
 
-data class LyricsLine(val timeMs: Long, val text: String)
-
-fun parseLrc(lrc: String): List<LyricsLine> {
-    val lines = mutableListOf<LyricsLine>()
-    val regex = Regex("\\[(\\d{2}):(\\d{2})\\.(\\d{2,3})\\](.+)")
-    lrc.lines().forEach { line ->
-        val match = regex.find(line) ?: return@forEach
-        val (min, sec, cs, text) = match.destructured
-        val ms = min.toLong() * 60000 + sec.toLong() * 1000 + cs.toLong() * 10
-        lines.add(LyricsLine(ms, text.trim()))
-    }
-    return lines.sortedBy { it.timeMs }
-}
-
-private val LocalModeTrackColor = Color(0xFF9B8EC4)
+private val LocalModeTrackColor    = Color(0xFF9B8EC4)
 private val LocalModeTrackColorDim = Color(0xFF9B8EC4).copy(alpha = 0.3f)
 
 @Composable
 fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
     val context = LocalContext.current
-    val prefs = remember { context.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE) }
+    val prefs   = remember { context.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE) }
 
-    val state by viewModel.combinedMediaState.collectAsStateWithLifecycle()
-    val isLocalPlaying by viewModel.isLocalPlaying.collectAsStateWithLifecycle()
-    val localArtwork by viewModel.localArtwork.collectAsStateWithLifecycle()
-    val localTrack by viewModel.localTrack.collectAsStateWithLifecycle()
-    val localQueue by viewModel.localQueue.collectAsStateWithLifecycle()
+    val state            by viewModel.combinedMediaState.collectAsStateWithLifecycle()
+    val isLocalPlaying   by viewModel.isLocalPlaying.collectAsStateWithLifecycle()
+    val localArtwork     by viewModel.localArtwork.collectAsStateWithLifecycle()
+    val localTrack       by viewModel.localTrack.collectAsStateWithLifecycle()
+    val localQueue       by viewModel.localQueue.collectAsStateWithLifecycle()
+    val isLocalShuffling by viewModel.isLocalShuffling.collectAsStateWithLifecycle()
+    val localRepeatMode  by viewModel.localRepeatMode.collectAsStateWithLifecycle()
+    val localProgress    by viewModel.localProgress.collectAsStateWithLifecycle()
+    val localPosition    by viewModel.localPosition.collectAsStateWithLifecycle()
+    val localDuration    by viewModel.localDuration.collectAsStateWithLifecycle()
+    val lyricsLines      by viewModel.lyricsLines.collectAsStateWithLifecycle()
 
     var showFullscreenArt by remember { mutableStateOf(false) }
-    var showQueue by remember { mutableStateOf(false) }
-    var seekPosition by remember { mutableStateOf<Float?>(null) }
-    var useLocalMedia by remember { mutableStateOf(false) }
-    var lyricsMode by remember { mutableStateOf(false) }
+    var showQueue         by remember { mutableStateOf(false) }
+    var useLocalMedia     by remember { mutableStateOf(false) }
+    var lyricsMode        by remember { mutableStateOf(false) }
+    var isSeeking         by remember { mutableStateOf(false) }
+    var seekPosition      by remember { mutableFloatStateOf(0f) }
+
+    // Clear isSeeking after a delay so the progress StateFlow has time to
+    // update before we stop overriding effectiveProgress with seekPosition.
+    LaunchedEffect(isSeeking) {
+        if (isSeeking) {
+            delay(500L)
+            isSeeking = false
+        }
+    }
 
     LaunchedEffect(isLocalPlaying) {
         if (isLocalPlaying) useLocalMedia = true
     }
 
-    val effectiveArtwork = if (useLocalMedia) localArtwork else state.artwork
-    val effectiveTitle = if (useLocalMedia) (localTrack?.title ?: state.title) else state.title
-    val effectiveArtist = if (useLocalMedia) (localTrack?.artist ?: state.artist) else state.artist
-    val effectiveProgress = seekPosition ?: state.progress
-    val effectivePosition = state.position
-    val effectiveDuration = state.duration
-    val hasValidDuration = effectiveDuration > 0
+    // ── Effective values ──────────────────────────────────────────────────────
+    val effectiveArtwork   = if (useLocalMedia) localArtwork  else state.artwork
+    val effectiveTitle     = if (useLocalMedia) (localTrack?.title  ?: state.title)  else state.title
+    val effectiveArtist    = if (useLocalMedia) (localTrack?.artist ?: state.artist) else state.artist
+    val effectiveIsPlaying = if (useLocalMedia) isLocalPlaying else state.isPlaying
+    val effectiveShuffling = if (useLocalMedia) isLocalShuffling else state.isShuffling
+    val effectiveRepeat    = if (useLocalMedia) localRepeatMode  else state.repeatMode
+    val effectiveProgress  = if (isSeeking) seekPosition else if (useLocalMedia) localProgress else state.progress
+    val effectivePosition  = if (useLocalMedia) localPosition else state.position
+    val effectiveDuration  = if (useLocalMedia) localDuration else state.duration
+    val hasValidDuration   = effectiveDuration > 0
 
     val effectiveQueue = if (useLocalMedia) {
         localQueue.map { QueueItem(title = it.title, artist = it.artist) }
@@ -122,36 +132,42 @@ fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
         state.queue
     }
 
-    val gesturesEnabled = remember { prefs.getBoolean("gestures_enabled", false) }
-    // Read on every recomposition so changes made in Settings are picked up immediately
-    val lyricsEnabled by remember { derivedStateOf { prefs.getBoolean("lyrics_enabled", false) } }
-    val karaokeEnabled by remember { derivedStateOf { prefs.getBoolean("karaoke_enabled", false) } }
-    val showTrackInfo by remember { derivedStateOf { prefs.getBoolean("show_track_info", true) } }
-    val showPlaybackControls by remember { derivedStateOf { prefs.getBoolean("show_playback_controls", true) } }
-    val showUpNext by remember { derivedStateOf { prefs.getBoolean("show_up_next", true) } }
-    val sliderStyle by remember { derivedStateOf { prefs.getString("player_slider_style", "wave") ?: "wave" } }
-
-    var lyricsLines by remember { mutableStateOf<List<LyricsLine>>(emptyList()) }
-
-    LaunchedEffect(effectiveTitle, effectiveArtist) {
-        if (effectiveTitle.isEmpty() || !lyricsEnabled) return@LaunchedEffect
-        lyricsLines = emptyList()
-        lyricsMode = false
-        try {
-            val encodedTitle = java.net.URLEncoder.encode(effectiveTitle, "UTF-8")
-            val encodedArtist = java.net.URLEncoder.encode(effectiveArtist, "UTF-8")
-            val url = "https://lrclib.net/api/get?track_name=$encodedTitle&artist_name=$encodedArtist"
-            val response = withContext(Dispatchers.IO) { java.net.URL(url).readText() }
-            val json = org.json.JSONObject(response)
-            val syncedLyrics = json.optString("syncedLyrics")
-            if (syncedLyrics.isNotEmpty()) lyricsLines = parseLrc(syncedLyrics)
-        } catch (e: Exception) {
-            lyricsLines = emptyList()
-        }
+    val externalNextTrack = remember(state.queue) { state.queue.getOrNull(1) }
+    val localNextTrack    = remember(localQueue) {
+        localQueue.getOrNull(localQueue.indexOfFirst { it.title == (localTrack?.title ?: "") } + 1)
     }
 
-    LaunchedEffect(lyricsLines) {
-        if (lyricsLines.isEmpty()) lyricsMode = false
+    val gesturesEnabled      = remember { prefs.getBoolean("gestures_enabled", false) }
+    val lyricsEnabled        by remember { derivedStateOf { prefs.getBoolean("lyrics_enabled", false) } }
+    val karaokeEnabled       by remember { derivedStateOf { prefs.getBoolean("karaoke_enabled", false) } }
+    val showTrackInfo        by remember { derivedStateOf { prefs.getBoolean("show_track_info", true) } }
+    val showPlaybackControls by remember { derivedStateOf { prefs.getBoolean("show_playback_controls", true) } }
+    val showUpNext           by remember { derivedStateOf { prefs.getBoolean("show_up_next", true) } }
+    val sliderStyle          by remember { derivedStateOf { prefs.getString("player_slider_style", "wave") ?: "wave" } }
+
+    LaunchedEffect(localTrack?.title, localTrack?.artist, localNextTrack, lyricsEnabled) {
+        if (!lyricsEnabled) return@LaunchedEffect
+        val title  = localTrack?.title  ?: return@LaunchedEffect
+        val artist = localTrack?.artist ?: ""
+        viewModel.fetchLyricsIfNeeded(
+            title      = title,
+            artist     = artist,
+            isLocal    = true,
+            nextTitle  = localNextTrack?.title  ?: "",
+            nextArtist = localNextTrack?.artist ?: ""
+        )
+    }
+
+    LaunchedEffect(state.title, state.artist, externalNextTrack, lyricsEnabled) {
+        if (!lyricsEnabled) return@LaunchedEffect
+        val title = state.title.ifEmpty { return@LaunchedEffect }
+        viewModel.fetchLyricsIfNeeded(
+            title      = title,
+            artist     = state.artist,
+            isLocal    = false,
+            nextTitle  = externalNextTrack?.title  ?: "",
+            nextArtist = externalNextTrack?.artist ?: ""
+        )
     }
 
     val currentLineIndex = remember(effectivePosition, lyricsLines) {
@@ -161,64 +177,72 @@ fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
 
     val lyricsListState = rememberLazyListState()
     LaunchedEffect(currentLineIndex) {
-        if (currentLineIndex >= 0) {
+        if (currentLineIndex >= 0)
             lyricsListState.animateScrollToItem(index = (currentLineIndex - 2).coerceAtLeast(0))
-        }
     }
 
     val currentUseLocalMedia by rememberUpdatedState(useLocalMedia)
-
     val dominantColor = remember(effectiveArtwork) { extractDominantColor(effectiveArtwork) }
-    val animatedColor by animateColorAsState(
-        targetValue = dominantColor,
-        animationSpec = tween(800),
-        label = "bg"
-    )
 
     val backgroundColor = when (appStyle) {
-        AppStyle.DYNAMIC -> animatedColor
+        AppStyle.DYNAMIC -> Color.Transparent
         AppStyle.AMOLED  -> Color.Black
         AppStyle.MINIMAL -> Color(prefs.getInt("minimal_color", 0xFF2C2C2C.toInt()))
         AppStyle.GLASS   -> Color.Black
     }
 
-    // Whether the karaoke button should be visible
     val showKaraokeButton = karaokeEnabled && lyricsEnabled && lyricsLines.isNotEmpty()
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .then(
-                if (gesturesEnabled) Modifier.pointerInput(useLocalMedia) {
-                    var totalX = 0f; var totalY = 0f
-                    detectDragGestures(
-                        onDragStart = { totalX = 0f; totalY = 0f },
-                        onDrag = { change, dragAmount ->
-                            change.consume()
-                            totalX += dragAmount.x
-                            totalY += dragAmount.y
-                        },
-                        onDragEnd = {
-                            val absX = kotlin.math.abs(totalX)
-                            val absY = kotlin.math.abs(totalY)
-                            if (absX > absY && absX > 100f) {
-                                if (totalX < 0 && !useLocalMedia) {
-                                    if (viewModel.mediaState.value.isPlaying) { viewModel.playPause(); viewModel.spotifyWasPausedByUs = true }
-                                    viewModel.resumeLocalMedia(); useLocalMedia = true
-                                } else if (totalX > 0 && useLocalMedia) {
-                                    viewModel.suspendLocalMedia()
-                                    if (viewModel.spotifyWasPausedByUs) { viewModel.playPause(); viewModel.spotifyWasPausedByUs = false }
-                                    useLocalMedia = false
-                                }
-                            } else if (absY > absX && absY > 100f) {
-                                if (totalY < 0) { if (useLocalMedia) viewModel.localNext(context) else viewModel.next() }
-                                else { if (useLocalMedia) viewModel.localPreviousOrRestart(context) else viewModel.previous() }
-                            }
-                        }
-                    )
-                } else Modifier
+    fun switchToLocal(toLocal: Boolean) {
+        val title  = if (toLocal) (localTrack?.title  ?: "") else state.title
+        val artist = if (toLocal) (localTrack?.artist ?: "") else state.artist
+        viewModel.syncLyricsForSource(title = title, artist = artist, isLocal = toLocal)
+        useLocalMedia = toLocal
+    }
+
+    // Shared seek callbacks — reused by all three slider styles
+    val onSeekChange: (Float) -> Unit = { newProgress ->
+        if (hasValidDuration) {
+            isSeeking = true
+            seekPosition = newProgress
+        }
+    }
+    val onSeekFinished: () -> Unit = {
+        if (hasValidDuration) {
+            if (currentUseLocalMedia) viewModel.seekToLocal(seekPosition)
+            else viewModel.seekTo(seekPosition)
+        }
+        // Do NOT set isSeeking = false here — the LaunchedEffect clears it after
+        // 500 ms so the StateFlows have time to reflect the new position first.
+    }
+
+    // ── Swipe gesture modifier ────────────────────────────────────────────────
+    // detectVerticalDragGestures only competes for vertical drags in the
+    // gesture arena. When the WaveSlider wins a horizontal drag first, this
+    // detector simply loses and never fires — sliders are never blocked.
+    val swipeModifier = if (gesturesEnabled) {
+        Modifier.pointerInput(useLocalMedia) {
+            var totalY = 0f
+            detectVerticalDragGestures(
+                onDragStart = { totalY = 0f },
+                onDragEnd = {
+                    if (totalY < -100f) {
+                        if (useLocalMedia) viewModel.localNext(context) else viewModel.next()
+                    } else if (totalY > 100f) {
+                        if (useLocalMedia) viewModel.localPreviousOrRestart(context) else viewModel.previous()
+                    }
+                },
+                onDragCancel = { totalY = 0f },
+                onVerticalDrag = { change, dragAmount ->
+                    change.consume()
+                    totalY += dragAmount
+                }
             )
-    ) {
+        }
+    } else Modifier
+
+    Box(modifier = Modifier.fillMaxSize().then(swipeModifier)) {
+
         // ── Background ────────────────────────────────────────────────────────
         if (appStyle == AppStyle.GLASS && effectiveArtwork != null) {
             Image(
@@ -229,14 +253,7 @@ fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
                 alpha = 0.4f
             )
             Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)))
-        } else {
-            Box(modifier = Modifier.fillMaxSize().background(backgroundColor))
         }
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.4f))))
-        )
 
         if (!state.isConnected) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -245,30 +262,33 @@ fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
         } else {
 
             // ── KARAOKE VIEW ──────────────────────────────────────────────────
-            AnimatedVisibility(
-                visible = lyricsMode,
-                enter = fadeIn(tween(400)),
-                exit = fadeOut(tween(400))
-            ) {
-                LyricsModeContent(
-                    lyricsLines = lyricsLines,
-                    currentLineIndex = currentLineIndex,
-                    listState = lyricsListState,
-                    title = effectiveTitle,
-                    artist = effectiveArtist,
-                    accentColor = dominantColor,
-                    onToggle = { lyricsMode = false }
-                )
+            AnimatedVisibility(visible = lyricsMode, enter = fadeIn(tween(400)), exit = fadeOut(tween(400))) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) { awaitPointerEventScope { while (true) { awaitPointerEvent() } } }
+                ) {
+                    LyricsModeContent(
+                        lyricsLines      = lyricsLines,
+                        currentLineIndex = currentLineIndex,
+                        listState        = lyricsListState,
+                        title            = effectiveTitle,
+                        artist           = effectiveArtist,
+                        accentColor      = dominantColor,
+                        onToggle         = { lyricsMode = false }
+                    )
+                }
             }
 
             // ── NORMAL PLAYER VIEW ────────────────────────────────────────────
-            AnimatedVisibility(
-                visible = !lyricsMode,
-                enter = fadeIn(tween(400)),
-                exit = fadeOut(tween(400))
-            ) {
+            AnimatedVisibility(visible = !lyricsMode, enter = fadeIn(tween(400)), exit = fadeOut(tween(400))) {
                 Column(
-                    modifier = Modifier.fillMaxSize().padding(24.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 24.dp)
+                        .padding(top = 24.dp)
+                        .navigationBarsPadding()
+                        .padding(bottom = 100.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
@@ -277,7 +297,18 @@ fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
                             targetState = effectiveArtwork,
                             transitionSpec = { fadeIn(tween(800)) togetherWith fadeOut(tween(800)) },
                             label = "artwork"
-                        ) { artwork -> AlbumArt(bitmap = artwork, onClick = { showFullscreenArt = true }) }
+                        ) { artwork ->
+                            AlbumArt(
+                                bitmap      = artwork,
+                                onSingleTap = {
+                                    if (gesturesEnabled) {
+                                        if (useLocalMedia) viewModel.toggleLocalPlayPause()
+                                        else viewModel.playPause()
+                                    }
+                                },
+                                onDoubleTap = { showFullscreenArt = true }
+                            )
+                        }
 
                         Spacer(Modifier.height(32.dp))
 
@@ -302,7 +333,6 @@ fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
                                 color = Color.White.copy(alpha = 0.5f)
                             )
                         }
-
                         Spacer(Modifier.height(16.dp))
                     } else {
                         val sleepTimerSeconds by viewModel.sleepTimerSeconds.collectAsStateWithLifecycle()
@@ -317,42 +347,28 @@ fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
                         Spacer(Modifier.height(16.dp))
                     }
 
+                    // ── Slider ────────────────────────────────────────────────
                     if (sliderStyle == "eq") {
-                        // EQ mode: animated vertical bars, no seek, no timestamps
                         EqSlider(
-                            value = if (hasValidDuration) effectiveProgress else 0f,
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
+                            value                 = if (hasValidDuration) effectiveProgress else 0f,
+                            onValueChange         = onSeekChange,
+                            onValueChangeFinished = onSeekFinished,
+                            modifier              = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
                         )
                     } else {
-                        // Wave or Minimal — both show timestamps
                         if (sliderStyle == "minimal" || appStyle == AppStyle.MINIMAL) {
-                            Slider(
-                                value = if (hasValidDuration) effectiveProgress else 0f,
-                                onValueChange = { if (hasValidDuration) seekPosition = it },
-                                onValueChangeFinished = {
-                                    if (hasValidDuration) seekPosition?.let {
-                                        if (currentUseLocalMedia) viewModel.seekToLocal(it) else viewModel.seekTo(it)
-                                    }
-                                    seekPosition = null
-                                },
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                                colors = SliderDefaults.colors(
-                                    thumbColor = Color.White,
-                                    activeTrackColor = Color.White,
-                                    inactiveTrackColor = Color.White.copy(alpha = 0.3f)
-                                )
+                            MinimalSeekBar(
+                                value                 = if (hasValidDuration) effectiveProgress else 0f,
+                                onValueChange         = onSeekChange,
+                                onValueChangeFinished = onSeekFinished,
+                                modifier              = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
                             )
                         } else {
                             WaveSlider(
-                                value = if (hasValidDuration) effectiveProgress else 0f,
-                                onValueChange = { if (hasValidDuration) seekPosition = it },
-                                onValueChangeFinished = {
-                                    if (hasValidDuration) seekPosition?.let {
-                                        if (currentUseLocalMedia) viewModel.seekToLocal(it) else viewModel.seekTo(it)
-                                    }
-                                    seekPosition = null
-                                },
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
+                                value                 = if (hasValidDuration) effectiveProgress else 0f,
+                                onValueChange         = onSeekChange,
+                                onValueChangeFinished = onSeekFinished,
+                                modifier              = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
                             )
                         }
 
@@ -372,16 +388,36 @@ fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
 
                     Spacer(Modifier.height(16.dp))
 
+                    // ── Playback controls ─────────────────────────────────────
                     if (showPlaybackControls) {
                         PlaybackControls(
-                            isPlaying = state.isPlaying,
-                            isShuffling = state.isShuffling,
-                            repeatMode = state.repeatMode,
-                            onPlayPause = { if (useLocalMedia) viewModel.toggleLocalPlayPause() else viewModel.playPause() },
-                            onNext = { if (useLocalMedia) viewModel.localNext(context) else viewModel.next() },
-                            onPrevious = { if (useLocalMedia) viewModel.localPreviousOrRestart(context) else viewModel.previous() },
-                            onShuffle = { if (useLocalMedia) viewModel.toggleLocalShuffle() else viewModel.toggleShuffle() },
-                            onRepeat = { if (useLocalMedia) viewModel.toggleLocalRepeat() else viewModel.toggleRepeat() }
+                            isPlaying   = effectiveIsPlaying,
+                            isShuffling = effectiveShuffling,
+                            repeatMode  = effectiveRepeat,
+                            onPlayPause = {
+                                if (useLocalMedia) viewModel.toggleLocalPlayPause()
+                                else viewModel.playPause()
+                            },
+                            onNext = {
+                                if (useLocalMedia) viewModel.localNext(context)
+                                else viewModel.next()
+                            },
+                            onPrevious = {
+                                if (useLocalMedia) {
+                                    viewModel.localPreviousOrRestart(context)
+                                } else {
+                                    if (effectivePosition > 3_000L) viewModel.seekTo(0f)
+                                    else viewModel.previous()
+                                }
+                            },
+                            onShuffle = {
+                                if (useLocalMedia) viewModel.toggleLocalShuffle()
+                                else viewModel.toggleShuffle()
+                            },
+                            onRepeat = {
+                                if (useLocalMedia) viewModel.toggleLocalRepeat()
+                                else viewModel.toggleRepeat()
+                            }
                         )
                         Spacer(Modifier.height(8.dp))
                     }
@@ -409,7 +445,7 @@ fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
                 }
             }
 
-            // ── KARAOKE ENTRY BUTTON (normal player view only) ────────────────
+            // ── KARAOKE ENTRY BUTTON ──────────────────────────────────────────
             if (showKaraokeButton && !lyricsMode) {
                 Box(
                     modifier = Modifier
@@ -427,133 +463,216 @@ fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Lyrics,
-                            contentDescription = "Karaoke mode",
-                            tint = Color.White,
-                            modifier = Modifier.size(16.dp)
-                        )
+                        Icon(Icons.Rounded.Lyrics, "Karaoke mode", tint = Color.White, modifier = Modifier.size(16.dp))
                         Text("Karaoke", style = MaterialTheme.typography.labelSmall, color = Color.White)
                     }
                 }
             }
 
             // ── SOURCE SWITCH ─────────────────────────────────────────────────
-            Box(
-                modifier = Modifier.fillMaxSize().padding(end = 20.dp, bottom = 32.dp),
-                contentAlignment = Alignment.BottomEnd
-            ) {
-                SourceSwitch(
-                    useLocalMedia = useLocalMedia,
-                    enabled = localTrack != null || useLocalMedia,
-                    onCheckedChange = { switchToLocal ->
-                        if (switchToLocal) {
-                            if (viewModel.mediaState.value.isPlaying) { viewModel.playPause(); viewModel.spotifyWasPausedByUs = true }
-                            viewModel.resumeLocalMedia()
-                        } else {
-                            viewModel.suspendLocalMedia()
-                            if (viewModel.spotifyWasPausedByUs) { viewModel.playPause(); viewModel.spotifyWasPausedByUs = false }
+            if (!lyricsMode) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .navigationBarsPadding()
+                        .padding(end = 20.dp, bottom = 120.dp),
+                    contentAlignment = Alignment.BottomEnd
+                ) {
+                    SourceSwitch(
+                        useLocalMedia = useLocalMedia,
+                        enabled       = localTrack != null || useLocalMedia,
+                        onCheckedChange = { toLocal ->
+                            if (toLocal) {
+                                if (viewModel.mediaState.value.isPlaying) {
+                                    viewModel.playPause()
+                                    viewModel.spotifyWasPausedByUs = true
+                                }
+                                viewModel.resumeLocalMedia()
+                            } else {
+                                viewModel.suspendLocalMedia()
+                                if (viewModel.spotifyWasPausedByUs) {
+                                    viewModel.playPause()
+                                    viewModel.spotifyWasPausedByUs = false
+                                }
+                            }
+                            viewModel.syncLyricsForSource(
+                                title   = if (toLocal) (localTrack?.title  ?: "") else state.title,
+                                artist  = if (toLocal) (localTrack?.artist ?: "") else state.artist,
+                                isLocal = toLocal
+                            )
+                            useLocalMedia = toLocal
                         }
-                        useLocalMedia = switchToLocal
-                    }
-                )
+                    )
+                }
             }
-        }
+        } // end isConnected
 
         if (showQueue) {
             Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f)).clickable { showQueue = false })
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
                 QueueSheet(
-                    queue = effectiveQueue,
-                    currentTitle = effectiveTitle,
-                    isSpotify = !useLocalMedia,
-                    localQueue = localQueue,
+                    queue             = effectiveQueue,
+                    currentTitle      = effectiveTitle,
+                    isSpotify         = !useLocalMedia,
+                    localQueue        = localQueue,
                     onRemoveFromQueue = { index -> viewModel.removeFromLocalQueue(index) },
-                    onDismiss = { showQueue = false }
+                    onDismiss         = { showQueue = false }
                 )
             }
         }
 
         FullscreenArtwork(
-            bitmap = effectiveArtwork,
-            visible = showFullscreenArt,
+            bitmap          = effectiveArtwork,
+            visible         = showFullscreenArt,
             backgroundColor = backgroundColor,
-            onDismiss = { showFullscreenArt = false }
+            onDismiss       = { showFullscreenArt = false }
         )
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EQ-style slider: animated vertical bars that follow playback position
+// EQ-style slider
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
 private fun EqSlider(
     value: Float,
+    onValueChange: (Float) -> Unit = {},
+    onValueChangeFinished: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     activeColor: Color = Color.White,
     inactiveColor: Color = Color.White.copy(alpha = 0.15f),
     barCount: Int = 40
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "eq")
-
-    // Each bar gets its own phase offset so they don't all move together
     val phases = remember(barCount) { List(barCount) { it.toFloat() / barCount } }
-
-    // One animated float drives time; individual bar heights derived from it + phase
     val time by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(2000, easing = LinearEasing), RepeatMode.Restart),
         label = "eqTime"
     )
+    val animatedValue by animateFloatAsState(targetValue = value, animationSpec = tween(200), label = "eqProgress")
+    var sliderWidth by remember { mutableFloatStateOf(1f) }
 
-    val animatedValue by animateFloatAsState(
-        targetValue = value,
-        animationSpec = tween(200),
-        label = "eqProgress"
-    )
-
-    Canvas(modifier = modifier.height(48.dp)) {
-        val barWidth = (size.width / barCount) * 0.55f
-        val gap = (size.width / barCount) * 0.45f
+    Canvas(
+        modifier = modifier
+            .height(48.dp)
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragStart = { offset ->
+                        onValueChange((offset.x / sliderWidth).coerceIn(0f, 1f))
+                    },
+                    onDragEnd = { onValueChangeFinished?.invoke() },
+                    onDragCancel = { onValueChangeFinished?.invoke() },
+                    onHorizontalDrag = { change, _ ->
+                        onValueChange((change.position.x / sliderWidth).coerceIn(0f, 1f))
+                        change.consume()
+                    }
+                )
+            }
+            .pointerInput(Unit) {
+                detectTapGestures { offset ->
+                    onValueChange((offset.x / sliderWidth).coerceIn(0f, 1f))
+                    onValueChangeFinished?.invoke()
+                }
+            }
+    ) {
+        sliderWidth  = size.width
+        val barWidth     = (size.width / barCount) * 0.55f
+        val gap          = (size.width / barCount) * 0.45f
         val maxBarHeight = size.height * 0.9f
         val minBarHeight = size.height * 0.08f
-        val progressX = size.width * animatedValue
+        val progressX    = size.width * animatedValue
 
         for (i in 0 until barCount) {
-            val x = i * (barWidth + gap) + gap / 2f
-            val centerX = x + barWidth / 2f
+            val x        = i * (barWidth + gap) + gap / 2f
+            val centerX  = x + barWidth / 2f
             val isActive = centerX <= progressX
-
-            // Height driven by a mix of two sine waves per bar for organic movement
-            val phase = phases[i]
+            val phase    = phases[i]
             val h1 = sin((time + phase) * 2f * kotlin.math.PI.toFloat())
             val h2 = sin((time * 1.7f + phase * 1.3f) * 2f * kotlin.math.PI.toFloat())
-            val normalised = ((h1 * 0.6f + h2 * 0.4f) + 1f) / 2f  // 0..1
-
-            val barHeight = if (isActive) {
+            val normalised = ((h1 * 0.6f + h2 * 0.4f) + 1f) / 2f
+            val barHeight = if (isActive)
                 minBarHeight + normalised * (maxBarHeight - minBarHeight)
-            } else {
+            else
                 minBarHeight + normalised * (maxBarHeight - minBarHeight) * 0.25f
-            }
-
-            val top = (size.height - barHeight) / 2f
             drawRoundRect(
-                color = if (isActive) activeColor else inactiveColor,
-                topLeft = androidx.compose.ui.geometry.Offset(x, top),
-                size = androidx.compose.ui.geometry.Size(barWidth, barHeight),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2f)
+                color        = if (isActive) activeColor else inactiveColor,
+                topLeft      = Offset(x, (size.height - barHeight) / 2f),
+                size         = Size(barWidth, barHeight),
+                cornerRadius = CornerRadius(barWidth / 2f)
             )
         }
     }
 }
 
+@Composable
+private fun MinimalSeekBar(
+    value: Float,
+    onValueChange: (Float) -> Unit = {},
+    onValueChangeFinished: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+    activeColor: Color = Color.White,
+    inactiveColor: Color = Color.White.copy(alpha = 0.25f),
+    thumbColor: Color = Color.White
+) {
+    val animatedValue by animateFloatAsState(targetValue = value, animationSpec = tween(100), label = "minimalProgress")
+    var sliderWidth by remember { mutableFloatStateOf(1f) }
+
+    Canvas(
+        modifier = modifier
+            .height(36.dp)
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragStart = { offset ->
+                        onValueChange((offset.x / sliderWidth).coerceIn(0f, 1f))
+                    },
+                    onDragEnd = { onValueChangeFinished?.invoke() },
+                    onDragCancel = { onValueChangeFinished?.invoke() },
+                    onHorizontalDrag = { change, _ ->
+                        onValueChange((change.position.x / sliderWidth).coerceIn(0f, 1f))
+                        change.consume()
+                    }
+                )
+            }
+            .pointerInput(Unit) {
+                detectTapGestures { offset ->
+                    onValueChange((offset.x / sliderWidth).coerceIn(0f, 1f))
+                    onValueChangeFinished?.invoke()
+                }
+            }
+    ) {
+        sliderWidth = size.width
+        val trackY = size.height / 2f
+        val trackHeight = 4.dp.toPx()
+        val progressX = size.width * animatedValue
+        val thumbRadius = 6.dp.toPx()
+
+        // Inactive track
+        drawRoundRect(
+            color = inactiveColor,
+            topLeft = Offset(0f, trackY - trackHeight / 2f),
+            size = Size(size.width, trackHeight),
+            cornerRadius = CornerRadius(trackHeight / 2f)
+        )
+        // Active track
+        drawRoundRect(
+            color = activeColor,
+            topLeft = Offset(0f, trackY - trackHeight / 2f),
+            size = Size(progressX, trackHeight),
+            cornerRadius = CornerRadius(trackHeight / 2f)
+        )
+        // Thumb
+        drawCircle(
+            color = thumbColor,
+            radius = thumbRadius,
+            center = Offset(progressX.coerceIn(thumbRadius, size.width - thumbRadius), trackY)
+        )
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Full-screen karaoke composable
+// Full-screen karaoke
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
@@ -568,9 +687,9 @@ private fun LyricsModeContent(
 ) {
     val highlightColor = remember(accentColor) {
         Color(
-            red = (accentColor.red + 0.55f).coerceAtMost(1f),
+            red   = (accentColor.red   + 0.55f).coerceAtMost(1f),
             green = (accentColor.green + 0.55f).coerceAtMost(1f),
-            blue = (accentColor.blue + 0.55f).coerceAtMost(1f),
+            blue  = (accentColor.blue  + 0.55f).coerceAtMost(1f),
             alpha = 1f
         )
     }
@@ -584,7 +703,7 @@ private fun LyricsModeContent(
         ) {
             itemsIndexed(lyricsLines) { index, line ->
                 val isCurrent = index == currentLineIndex
-                val isPast = index < currentLineIndex
+                val isPast    = index < currentLineIndex
                 AnimatedContent(
                     targetState = isCurrent,
                     transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(300)) },
@@ -593,7 +712,7 @@ private fun LyricsModeContent(
                     Text(
                         text = line.text,
                         style = MaterialTheme.typography.bodyLarge.copy(
-                            fontSize = if (current) 24.sp else 18.sp,
+                            fontSize   = if (current) 24.sp else 18.sp,
                             fontWeight = if (current) FontWeight.Bold else FontWeight.Normal,
                             lineHeight = if (current) 32.sp else 26.sp
                         ),
@@ -608,52 +727,36 @@ private fun LyricsModeContent(
             }
         }
 
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(160.dp)
-                .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.85f), Color.Transparent)))
-        )
+        Box(modifier = Modifier.fillMaxWidth().height(160.dp)
+            .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.85f), Color.Transparent))))
 
         Row(
             modifier = Modifier
-                .fillMaxWidth()
-                .statusBarsPadding()
+                .fillMaxWidth().statusBarsPadding()
                 .padding(horizontal = 16.dp, vertical = 12.dp)
                 .align(Alignment.TopStart),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f).padding(start = 16.dp)) {
-                Text(title, style = MaterialTheme.typography.titleMedium, color = Color.White, fontWeight = FontWeight.SemiBold)
-                Text(artist, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.6f))
+                Text(title,  style = MaterialTheme.typography.titleMedium, color = Color.White, fontWeight = FontWeight.SemiBold)
+                Text(artist, style = MaterialTheme.typography.bodySmall,   color = Color.White.copy(alpha = 0.6f))
             }
             Spacer(Modifier.width(8.dp))
             Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(20.dp))
+                modifier = Modifier.clip(RoundedCornerShape(20.dp))
                     .background(Color.White.copy(alpha = 0.25f))
                     .clickable { onToggle() }
                     .padding(horizontal = 12.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Rounded.MusicNote,
-                    contentDescription = "Back to player",
-                    tint = Color.White,
-                    modifier = Modifier.size(16.dp)
-                )
+                Icon(Icons.Rounded.MusicNote, "Back to player", tint = Color.White, modifier = Modifier.size(16.dp))
                 Text("Player", style = MaterialTheme.typography.labelSmall, color = Color.White)
             }
         }
 
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(120.dp)
-                .align(Alignment.BottomCenter)
-                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))))
-        )
+        Box(modifier = Modifier.fillMaxWidth().height(120.dp).align(Alignment.BottomCenter)
+            .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f)))))
     }
 }
 
@@ -668,34 +771,34 @@ private fun SourceSwitch(
     onCheckedChange: (Boolean) -> Unit
 ) {
     val trackColor by animateColorAsState(
-        targetValue = if (useLocalMedia) LocalModeTrackColor else Color.White.copy(alpha = 0.15f),
+        targetValue   = if (useLocalMedia) LocalModeTrackColor else Color.White.copy(alpha = 0.15f),
         animationSpec = tween(300), label = "switchTrack"
     )
     val trackColorDisabled by animateColorAsState(
-        targetValue = if (useLocalMedia) LocalModeTrackColorDim else Color.White.copy(alpha = 0.08f),
+        targetValue   = if (useLocalMedia) LocalModeTrackColorDim else Color.White.copy(alpha = 0.08f),
         animationSpec = tween(300), label = "switchTrackDim"
     )
     Switch(
-        checked = useLocalMedia,
+        checked         = useLocalMedia,
         onCheckedChange = if (enabled) onCheckedChange else null,
-        thumbContent = {
+        thumbContent    = {
             Icon(
-                imageVector = if (useLocalMedia) Icons.Rounded.PhoneAndroid else Icons.Rounded.Cloud,
+                imageVector        = if (useLocalMedia) Icons.Rounded.PhoneAndroid else Icons.Rounded.Cloud,
                 contentDescription = if (useLocalMedia) "Local device" else "Spotify",
-                modifier = Modifier.size(14.dp)
+                modifier           = Modifier.size(14.dp)
             )
         },
         colors = SwitchDefaults.colors(
-            checkedThumbColor = Color.White,
-            checkedTrackColor = if (enabled) trackColor else trackColorDisabled,
-            checkedIconColor = LocalModeTrackColor,
-            checkedBorderColor = Color.Transparent,
-            uncheckedThumbColor = Color.White.copy(alpha = 0.9f),
-            uncheckedTrackColor = if (enabled) trackColor else trackColorDisabled,
-            uncheckedIconColor = Color.White.copy(alpha = 0.6f),
-            uncheckedBorderColor = Color.Transparent,
-            disabledCheckedThumbColor = Color.White.copy(alpha = 0.4f),
-            disabledCheckedTrackColor = trackColorDisabled,
+            checkedThumbColor           = Color.White,
+            checkedTrackColor           = if (enabled) trackColor else trackColorDisabled,
+            checkedIconColor            = LocalModeTrackColor,
+            checkedBorderColor          = Color.Transparent,
+            uncheckedThumbColor         = Color.White.copy(alpha = 0.9f),
+            uncheckedTrackColor         = if (enabled) trackColor else trackColorDisabled,
+            uncheckedIconColor          = Color.White.copy(alpha = 0.6f),
+            uncheckedBorderColor        = Color.Transparent,
+            disabledCheckedThumbColor   = Color.White.copy(alpha = 0.4f),
+            disabledCheckedTrackColor   = trackColorDisabled,
             disabledUncheckedThumbColor = Color.White.copy(alpha = 0.3f),
             disabledUncheckedTrackColor = Color.White.copy(alpha = 0.06f)
         )

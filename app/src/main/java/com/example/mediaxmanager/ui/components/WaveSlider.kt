@@ -2,8 +2,9 @@ package com.example.mediaxmanager.ui.components
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -13,6 +14,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
 import kotlin.math.sin
@@ -26,31 +28,32 @@ fun WaveSlider(
     activeColor: Color = Color.White,
     inactiveColor: Color = Color.White.copy(alpha = 0.3f)
 ) {
+    var isDragging by remember { mutableStateOf(false) }
+
     val animatedValue by animateFloatAsState(
         targetValue = value,
-        animationSpec = if (abs(value - 0f) > 0.05f) {
-            tween(durationMillis = 100, easing = FastOutLinearInEasing)
+        animationSpec = if (isDragging) {
+            tween(durationMillis = 0)
         } else {
-            tween(durationMillis = 400, easing = LinearEasing)
+            tween(durationMillis = 100, easing = FastOutLinearInEasing)
         },
         label = "progress"
     )
 
     val wavePhase by rememberInfiniteTransition(label = "wave").animateFloat(
         initialValue = 0f,
-        targetValue = 2f * Math.PI.toFloat(),
+        targetValue  = 2f * Math.PI.toFloat(),
         animationSpec = infiniteRepeatable(
-            animation = tween(1500, easing = LinearEasing),
+            animation  = tween(1500, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "phase"
     )
 
-    var isSeeking by remember { mutableStateOf(false) }
     val waveAmplitude by animateFloatAsState(
-        targetValue = if (isSeeking) 12f else 6f,
+        targetValue   = if (isDragging) 12f else 6f,
         animationSpec = tween(200),
-        label = "amplitude"
+        label         = "amplitude"
     )
 
     var sliderWidth by remember { mutableFloatStateOf(1f) }
@@ -58,57 +61,52 @@ fun WaveSlider(
     Canvas(
         modifier = modifier
             .height(36.dp)
-            // Drag gesture — tracks absolute X position correctly
             .pointerInput(Unit) {
-                detectHorizontalDragGestures(
-                    onDragStart = { offset ->
-                        isSeeking = true
-                        val newValue = (offset.x / sliderWidth).coerceIn(0f, 1f)
-                        onValueChange(newValue)
-                    },
-                    onDragEnd = {
-                        isSeeking = false
-                        onValueChangeFinished?.invoke()
-                    },
-                    onDragCancel = {
-                        isSeeking = false
-                    },
-                    onHorizontalDrag = { change, _ ->
-                        // Use absolute position within the canvas, not delta
+                awaitEachGesture {
+                    // Wait for finger down — don't require it to be unconsumed
+                    // so parent scroll containers don't block us
+                    val down = awaitFirstDown(requireUnconsumed = false)
+
+                    // Report initial touch position immediately (handles taps too)
+                    val initialValue = (down.position.x / sliderWidth).coerceIn(0f, 1f)
+                    onValueChange(initialValue)
+                    isDragging = true
+
+                    // horizontalDrag will track all subsequent move events until
+                    // the pointer is lifted, then return. This is a single unified
+                    // gesture handler so there's no competition between recognizers.
+                    horizontalDrag(down.id) { change ->
                         val newValue = (change.position.x / sliderWidth).coerceIn(0f, 1f)
                         onValueChange(newValue)
+                        change.consume()
                     }
-                )
-            }
-            // Tap gesture — also triggers onValueChangeFinished
-            .pointerInput(Unit) {
-                detectTapGestures { offset ->
-                    val newValue = (offset.x / sliderWidth).coerceIn(0f, 1f)
-                    onValueChange(newValue)
+
+                    // Pointer lifted — gesture complete
+                    isDragging = false
                     onValueChangeFinished?.invoke()
                 }
             }
     ) {
         sliderWidth = size.width
-        val midY = size.height / 2f
-        val progressX = size.width * animatedValue
-        val wavelength = size.width / 6f
+        val midY        = size.height / 2f
+        val progressX   = size.width * animatedValue
+        val wavelength  = size.width / 6f
         val amplitudePx = waveAmplitude.dp.toPx()
 
-        // Inactive flat line
+        // Inactive flat line (right of thumb)
         if (progressX < size.width) {
             drawLine(
-                color = inactiveColor,
-                start = Offset(progressX, midY),
-                end = Offset(size.width, midY),
+                color       = inactiveColor,
+                start       = Offset(progressX, midY),
+                end         = Offset(size.width, midY),
                 strokeWidth = 3.dp.toPx(),
-                cap = StrokeCap.Round
+                cap         = StrokeCap.Round
             )
         }
 
-        // Active wavy line
+        // Active wavy line (left of thumb)
         if (progressX > 0f) {
-            val path = Path()
+            val path  = Path()
             val steps = 300
             for (i in 0..steps) {
                 val x = (i.toFloat() / steps) * progressX
@@ -118,16 +116,16 @@ fun WaveSlider(
                 if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
             }
             drawPath(
-                path = path,
+                path  = path,
                 color = activeColor,
                 style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
             )
         }
 
-        // Thumb
+        // Thumb dot
         drawCircle(
-            color = activeColor,
-            radius = if (isSeeking) 8.dp.toPx() else 6.dp.toPx(),
+            color  = activeColor,
+            radius = if (isDragging) 8.dp.toPx() else 6.dp.toPx(),
             center = Offset(progressX, midY)
         )
     }
