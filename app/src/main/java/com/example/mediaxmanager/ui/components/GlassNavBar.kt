@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -25,6 +26,7 @@ import androidx.compose.ui.unit.sp
 fun GlassNavBar(
     selectedIndex: Int,
     onHomeClick: () -> Unit,
+    onSearchClick: () -> Unit,
     onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -33,7 +35,6 @@ fun GlassNavBar(
             .fillMaxWidth()
             .height(80.dp)
     ) {
-        // Base glass layer
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -46,16 +47,12 @@ fun GlassNavBar(
                     )
                 )
         )
-
-        // Top highlight — fake reflection line
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(1.dp)
                 .background(Color.White.copy(alpha = 0.4f))
         )
-
-        // Glossy sheen — upper half brighter
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -70,15 +67,10 @@ fun GlassNavBar(
                     )
                 )
         )
-
-        // Circular highlight blobs (fake lens reflections)
         Canvas(modifier = Modifier.fillMaxSize()) {
             drawOval(
                 brush = Brush.radialGradient(
-                    colors = listOf(
-                        Color.White.copy(alpha = 0.12f),
-                        Color.Transparent
-                    ),
+                    colors = listOf(Color.White.copy(alpha = 0.12f), Color.Transparent),
                     center = Offset(size.width * 0.25f, size.height * 0.2f),
                     radius = size.width * 0.2f
                 ),
@@ -87,10 +79,7 @@ fun GlassNavBar(
             )
             drawOval(
                 brush = Brush.radialGradient(
-                    colors = listOf(
-                        Color.White.copy(alpha = 0.08f),
-                        Color.Transparent
-                    ),
+                    colors = listOf(Color.White.copy(alpha = 0.08f), Color.Transparent),
                     center = Offset(size.width * 0.75f, size.height * 0.2f),
                     radius = size.width * 0.2f
                 ),
@@ -98,37 +87,29 @@ fun GlassNavBar(
                 size = Size(size.width * 0.4f, size.height * 0.6f)
             )
         }
-
-        // Nav items
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 32.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
             GlassNavItem(
-                icon = {
-                    Icon(
-                        Icons.Default.Home,
-                        contentDescription = "Home",
-                        tint = Color.White
-                    )
-                },
+                icon = { Icon(Icons.Default.Home, contentDescription = "Home", tint = Color.White) },
                 label = "Home",
                 selected = selectedIndex == 0,
                 onClick = onHomeClick
             )
             GlassNavItem(
-                icon = {
-                    Icon(
-                        Icons.Default.Settings,
-                        contentDescription = "Settings",
-                        tint = Color.White
-                    )
-                },
-                label = "Settings",
+                icon = { Icon(Icons.Default.Search, contentDescription = "Search", tint = Color.White) },
+                label = "Search",
                 selected = selectedIndex == 1,
+                onClick = onSearchClick
+            )
+            GlassNavItem(
+                icon = { Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Color.White) },
+                label = "Settings",
+                selected = selectedIndex == 2,
                 onClick = onSettingsClick
             )
         }
@@ -156,7 +137,7 @@ fun GlassNavItem(
                 ) else Modifier
             )
             .clickable { onClick() }
-            .padding(horizontal = 24.dp, vertical = 8.dp),
+            .padding(horizontal = 20.dp, vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         icon()

@@ -13,3 +13,5 @@
 .externalNativeBuild
 .cxx
 local.properties
+mediaxmanager.jks
+app/release/
