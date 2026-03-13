@@ -417,7 +417,7 @@ fun SearchScreen(
     val fieldRadius = if (m3Enabled) 28.dp else 12.dp
 
     Box(
-        modifier = Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = hPad)
+        modifier = Modifier.fillMaxSize()
     ) {
         // Glass layer
         if (appStyle == AppStyle.GLASS) {
@@ -431,7 +431,7 @@ fun SearchScreen(
             }
         }
 
-        Column {
+        Column(modifier = Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = hPad)) {
             Spacer(Modifier.height(if (m3Enabled) 28.dp else 24.dp))
 
             // ── Title + source toggle ─────────────────────────────────────────
@@ -926,9 +926,8 @@ fun JellyfinAlbumDetailScreen(
         isLoading = false
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(bgColor)) {
+    Box(modifier = Modifier.fillMaxSize().clickable(enabled = false, onClick = {}).background(bgColor)) {
         Column {
-            Spacer(Modifier.statusBarsPadding())
             // Hero
             Box(modifier = Modifier.fillMaxWidth().height(210.dp)) {
                 if (headerArt != null) {
@@ -938,13 +937,13 @@ fun JellyfinAlbumDetailScreen(
                 Box(modifier = Modifier.fillMaxSize().background(
                     Brush.verticalGradient(listOf(Color.Transparent, bgColor), startY = 60f)))
                 IconButton(onClick = onBack,
-                    modifier = Modifier.align(Alignment.TopStart).padding(8.dp)
+                    modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(8.dp)
                         .clip(CircleShape).background(Color.Black.copy(alpha = 0.28f))) {
                     Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
                 }
                 if (tracks.isNotEmpty()) {
                     IconButton(onClick = { showSheet = true },
-                        modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)
+                        modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp)
                             .clip(CircleShape).background(Color.Black.copy(alpha = 0.28f))) {
                         Icon(Icons.Default.PlaylistAdd, null, tint = Color.White)
                     }
@@ -1212,15 +1211,14 @@ fun FolderDetailScreen(folderPath: String, allTracks: List<LocalTrack>, context:
     val firstKnownTrack = remember(folderPath, allTracks) { allTracks.firstOrNull { it.path.startsWith("$folderPath/") } }
     val headerArt = remember(folderPath, allTracks) { firstKnownTrack?.let { TrackCache.artCache[it.uri.toString().ifBlank { it.path }] } }
     val artistName = remember(folderPath, allTracks) { firstKnownTrack?.let { TrackCache.artistCache[it.uri.toString().ifBlank { it.path }] } }
-    Box(modifier = Modifier.fillMaxSize().background(bgColor)) {
+    Box(modifier = Modifier.fillMaxSize().clickable(enabled = false, onClick = {}).background(bgColor)) {
         Column {
-            Spacer(Modifier.statusBarsPadding())
             Box(modifier = Modifier.fillMaxWidth().height(210.dp)) {
                 if (headerArt != null) Image(bitmap = headerArt.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(), alpha = 0.3f)
                 Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, bgColor), startY = 60f)))
-                IconButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart).padding(8.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.28f))) { Icon(Icons.Default.ArrowBack, "Back", tint = Color.White) }
+                IconButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(8.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.28f))) { Icon(Icons.Default.ArrowBack, "Back", tint = Color.White) }
                 if (!tracks.isNullOrEmpty()) {
-                    IconButton(onClick = { showSheet = true }, modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.28f))) { Icon(Icons.Default.PlaylistAdd, null, tint = Color.White) }
+                    IconButton(onClick = { showSheet = true }, modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.28f))) { Icon(Icons.Default.PlaylistAdd, null, tint = Color.White) }
                 }
                 Row(modifier = Modifier.align(Alignment.BottomStart).padding(horizontal = 20.dp, vertical = 16.dp),
                     verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(14.dp)) {

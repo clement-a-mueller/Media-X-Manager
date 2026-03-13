@@ -2,6 +2,7 @@ package com.example.mediaxmanager.ui.screens
 
 import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
 import android.provider.DocumentsContract
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -108,6 +109,8 @@ fun MainSettingsScreen(
     val scope   = rememberCoroutineScope()
 
     var sleepTimerMinutes    by remember { mutableStateOf(prefs.getInt("sleep_timer", 0)) }
+    var volumeSyncEnabled    by remember { mutableStateOf(prefs.getBoolean("pc_volume_sync", true)) }
+    var manualVolume         by remember { mutableStateOf(prefs.getInt("pc_manual_volume", 80)) }
     var aodEnabled           by remember { mutableStateOf(prefs.getBoolean("aod_enabled", false)) }
     var gesturesEnabled      by remember { mutableStateOf(prefs.getBoolean("gestures_enabled", false)) }
     var searchRefreshMinutes by remember { mutableStateOf(prefs.getInt("search_refresh_minutes", -1)) }
@@ -144,6 +147,52 @@ fun MainSettingsScreen(
                 SettingsGroupRow(title = "Design", subtitle = "App style, colors, fullscreen, lyrics & karaoke",
                     m3Enabled = m3Enabled, onClick = onOpenDesign)
                 Spacer(Modifier.height(if (m3Enabled) 24.dp else 0.dp))
+            }
+
+            // ── Linux Client Volume ──────────────────────────────────────────
+            item {
+                if (!m3Enabled) HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp), color = Color.White.copy(alpha = 0.1f))
+                SectionLabel("Linux Client Volume", m3Enabled)
+                Spacer(Modifier.height(if (m3Enabled) 12.dp else 8.dp))
+                SettingsCard(m3Enabled) {
+                    val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+                    SettingsToggle(
+                        title    = "Sync with phone volume",
+                        subtitle = "Linux client volume matches your media volume buttons",
+                        checked  = volumeSyncEnabled,
+                        onCheckedChange = {
+                            volumeSyncEnabled = it
+                            prefs.edit().putBoolean("pc_volume_sync", it).apply()
+                        }
+                    )
+                    AnimatedVisibility(visible = !volumeSyncEnabled, enter = expandVertically(), exit = shrinkVertically()) {
+                        Column {
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = Color.White.copy(alpha = if (m3Enabled) 0.07f else 0.1f))
+                            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Icon(Icons.Default.VolumeDown, null, tint = Color.White.copy(alpha = 0.5f), modifier = Modifier.size(18.dp))
+                                Slider(
+                                    value         = manualVolume.toFloat(),
+                                    onValueChange = {
+                                        manualVolume = it.toInt()
+                                        prefs.edit().putInt("pc_manual_volume", it.toInt()).apply()
+                                    },
+                                    valueRange = 0f..100f,
+                                    modifier   = Modifier.weight(1f),
+                                    colors     = SliderDefaults.colors(
+                                        thumbColor            = Color.White,
+                                        activeTrackColor      = Color.White.copy(alpha = 0.8f),
+                                        inactiveTrackColor    = Color.White.copy(alpha = 0.2f)
+                                    )
+                                )
+                                Icon(Icons.Default.VolumeUp, null, tint = Color.White.copy(alpha = 0.5f), modifier = Modifier.size(18.dp))
+                                Text("${manualVolume}%", style = MaterialTheme.typography.bodySmall,
+                                    color = Color.White.copy(alpha = 0.7f), modifier = Modifier.width(36.dp))
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(cardSpacing))
             }
 
             // ── Sleep Timer ──────────────────────────────────────────────────
