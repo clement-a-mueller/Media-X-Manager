@@ -64,6 +64,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import kotlin.math.sin
 import kotlinx.coroutines.delay
+import android.content.SharedPreferences
 
 fun extractDominantColor(bitmap: Bitmap?): Color {
     if (bitmap == null) return Color(0xFF1C1B1F)
@@ -137,13 +138,29 @@ fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
         localQueue.getOrNull(localQueue.indexOfFirst { it.title == (localTrack?.title ?: "") } + 1)
     }
 
-    val gesturesEnabled      = remember { prefs.getBoolean("gestures_enabled", false) }
-    val lyricsEnabled        by remember { derivedStateOf { prefs.getBoolean("lyrics_enabled", false) } }
-    val karaokeEnabled       by remember { derivedStateOf { prefs.getBoolean("karaoke_enabled", false) } }
-    val showTrackInfo        by remember { derivedStateOf { prefs.getBoolean("show_track_info", true) } }
-    val showPlaybackControls by remember { derivedStateOf { prefs.getBoolean("show_playback_controls", true) } }
-    val showUpNext           by remember { derivedStateOf { prefs.getBoolean("show_up_next", true) } }
-    val sliderStyle          by remember { derivedStateOf { prefs.getString("player_slider_style", "wave") ?: "wave" } }
+    val gesturesEnabled = remember { prefs.getBoolean("gestures_enabled", false) }
+
+    var lyricsEnabled        by remember { mutableStateOf(prefs.getBoolean("lyrics_enabled", false)) }
+    var karaokeEnabled       by remember { mutableStateOf(prefs.getBoolean("karaoke_enabled", false)) }
+    var showTrackInfo        by remember { mutableStateOf(prefs.getBoolean("show_track_info", true)) }
+    var showPlaybackControls by remember { mutableStateOf(prefs.getBoolean("show_playback_controls", true)) }
+    var showUpNext           by remember { mutableStateOf(prefs.getBoolean("show_up_next", true)) }
+    var sliderStyle          by remember { mutableStateOf(prefs.getString("player_slider_style", "wave") ?: "wave") }
+
+    DisposableEffect(prefs) {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { sp, key ->
+            when (key) {
+                "lyrics_enabled"          -> lyricsEnabled        = sp.getBoolean(key, false)
+                "karaoke_enabled"         -> karaokeEnabled       = sp.getBoolean(key, false)
+                "show_track_info"         -> showTrackInfo        = sp.getBoolean(key, true)
+                "show_playback_controls"  -> showPlaybackControls = sp.getBoolean(key, true)
+                "show_up_next"            -> showUpNext           = sp.getBoolean(key, true)
+                "player_slider_style"     -> sliderStyle          = sp.getString(key, "wave") ?: "wave"
+            }
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
 
     LaunchedEffect(localTrack?.title, localTrack?.artist, localNextTrack, lyricsEnabled) {
         if (!lyricsEnabled) return@LaunchedEffect
