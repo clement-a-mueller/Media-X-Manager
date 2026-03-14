@@ -97,7 +97,7 @@ fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
 
     var showFullscreenArt by remember { mutableStateOf(false) }
     var showQueue         by remember { mutableStateOf(false) }
-    var useLocalMedia     by remember { mutableStateOf(false) }
+    var useLocalMedia by remember { mutableStateOf(isLocalPlaying || (localTrack != null && !state.isConnected)) }
     var lyricsMode        by remember { mutableStateOf(false) }
     var isSeeking         by remember { mutableStateOf(false) }
     var seekPosition      by remember { mutableFloatStateOf(0f) }
@@ -272,7 +272,7 @@ fun HomeScreen(viewModel: MediaViewModel, appStyle: AppStyle) {
             Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)))
         }
 
-        if (!state.isConnected) {
+        if (!state.isConnected && localTrack == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("No media playing", style = MaterialTheme.typography.headlineMedium, color = Color.White)
             }
@@ -569,6 +569,8 @@ private fun EqSlider(
         label = "eqTime"
     )
     val animatedValue by animateFloatAsState(targetValue = value, animationSpec = tween(200), label = "eqProgress")
+    val currentOnValueChange by rememberUpdatedState(onValueChange)
+    val currentOnValueChangeFinished by rememberUpdatedState(onValueChangeFinished)
     var sliderWidth by remember { mutableFloatStateOf(1f) }
 
     Canvas(
@@ -577,20 +579,20 @@ private fun EqSlider(
             .pointerInput(Unit) {
                 detectHorizontalDragGestures(
                     onDragStart = { offset ->
-                        onValueChange((offset.x / sliderWidth).coerceIn(0f, 1f))
+                        currentOnValueChange((offset.x / sliderWidth).coerceIn(0f, 1f))
                     },
-                    onDragEnd = { onValueChangeFinished?.invoke() },
-                    onDragCancel = { onValueChangeFinished?.invoke() },
+                    onDragEnd = { currentOnValueChangeFinished?.invoke() },
+                    onDragCancel = { currentOnValueChangeFinished?.invoke() },
                     onHorizontalDrag = { change, _ ->
-                        onValueChange((change.position.x / sliderWidth).coerceIn(0f, 1f))
+                        currentOnValueChange((change.position.x / sliderWidth).coerceIn(0f, 1f))
                         change.consume()
                     }
                 )
             }
             .pointerInput(Unit) {
                 detectTapGestures { offset ->
-                    onValueChange((offset.x / sliderWidth).coerceIn(0f, 1f))
-                    onValueChangeFinished?.invoke()
+                    currentOnValueChange((offset.x / sliderWidth).coerceIn(0f, 1f))
+                    currentOnValueChangeFinished?.invoke()
                 }
             }
     ) {
@@ -634,6 +636,8 @@ private fun MinimalSeekBar(
     thumbColor: Color = Color.White
 ) {
     val animatedValue by animateFloatAsState(targetValue = value, animationSpec = tween(100), label = "minimalProgress")
+    val currentOnValueChange by rememberUpdatedState(onValueChange)
+    val currentOnValueChangeFinished by rememberUpdatedState(onValueChangeFinished)
     var sliderWidth by remember { mutableFloatStateOf(1f) }
 
     Canvas(
@@ -642,20 +646,20 @@ private fun MinimalSeekBar(
             .pointerInput(Unit) {
                 detectHorizontalDragGestures(
                     onDragStart = { offset ->
-                        onValueChange((offset.x / sliderWidth).coerceIn(0f, 1f))
+                        currentOnValueChange((offset.x / sliderWidth).coerceIn(0f, 1f))
                     },
-                    onDragEnd = { onValueChangeFinished?.invoke() },
-                    onDragCancel = { onValueChangeFinished?.invoke() },
+                    onDragEnd = { currentOnValueChangeFinished?.invoke() },
+                    onDragCancel = { currentOnValueChangeFinished?.invoke() },
                     onHorizontalDrag = { change, _ ->
-                        onValueChange((change.position.x / sliderWidth).coerceIn(0f, 1f))
+                        currentOnValueChange((change.position.x / sliderWidth).coerceIn(0f, 1f))
                         change.consume()
                     }
                 )
             }
             .pointerInput(Unit) {
                 detectTapGestures { offset ->
-                    onValueChange((offset.x / sliderWidth).coerceIn(0f, 1f))
-                    onValueChangeFinished?.invoke()
+                    currentOnValueChange((offset.x / sliderWidth).coerceIn(0f, 1f))
+                    currentOnValueChangeFinished?.invoke()
                 }
             }
     ) {
@@ -665,21 +669,18 @@ private fun MinimalSeekBar(
         val progressX = size.width * animatedValue
         val thumbRadius = 6.dp.toPx()
 
-        // Inactive track
         drawRoundRect(
             color = inactiveColor,
             topLeft = Offset(0f, trackY - trackHeight / 2f),
             size = Size(size.width, trackHeight),
             cornerRadius = CornerRadius(trackHeight / 2f)
         )
-        // Active track
         drawRoundRect(
             color = activeColor,
             topLeft = Offset(0f, trackY - trackHeight / 2f),
             size = Size(progressX, trackHeight),
             cornerRadius = CornerRadius(trackHeight / 2f)
         )
-        // Thumb
         drawCircle(
             color = thumbColor,
             radius = thumbRadius,
