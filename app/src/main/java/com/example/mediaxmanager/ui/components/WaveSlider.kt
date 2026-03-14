@@ -56,6 +56,8 @@ fun WaveSlider(
         label         = "amplitude"
     )
 
+    val currentOnValueChange by rememberUpdatedState(onValueChange)
+    val currentOnValueChangeFinished by rememberUpdatedState(onValueChangeFinished)
     var sliderWidth by remember { mutableFloatStateOf(1f) }
 
     Canvas(
@@ -63,27 +65,20 @@ fun WaveSlider(
             .height(36.dp)
             .pointerInput(Unit) {
                 awaitEachGesture {
-                    // Wait for finger down — don't require it to be unconsumed
-                    // so parent scroll containers don't block us
                     val down = awaitFirstDown(requireUnconsumed = false)
 
-                    // Report initial touch position immediately (handles taps too)
                     val initialValue = (down.position.x / sliderWidth).coerceIn(0f, 1f)
-                    onValueChange(initialValue)
+                    currentOnValueChange(initialValue)
                     isDragging = true
 
-                    // horizontalDrag will track all subsequent move events until
-                    // the pointer is lifted, then return. This is a single unified
-                    // gesture handler so there's no competition between recognizers.
                     horizontalDrag(down.id) { change ->
                         val newValue = (change.position.x / sliderWidth).coerceIn(0f, 1f)
-                        onValueChange(newValue)
+                        currentOnValueChange(newValue)
                         change.consume()
                     }
 
-                    // Pointer lifted — gesture complete
                     isDragging = false
-                    onValueChangeFinished?.invoke()
+                    currentOnValueChangeFinished?.invoke()
                 }
             }
     ) {
@@ -93,7 +88,6 @@ fun WaveSlider(
         val wavelength  = size.width / 6f
         val amplitudePx = waveAmplitude.dp.toPx()
 
-        // Inactive flat line (right of thumb)
         if (progressX < size.width) {
             drawLine(
                 color       = inactiveColor,
@@ -104,7 +98,6 @@ fun WaveSlider(
             )
         }
 
-        // Active wavy line (left of thumb)
         if (progressX > 0f) {
             val path  = Path()
             val steps = 300
@@ -122,7 +115,6 @@ fun WaveSlider(
             )
         }
 
-        // Thumb dot
         drawCircle(
             color  = activeColor,
             radius = if (isDragging) 8.dp.toPx() else 6.dp.toPx(),
