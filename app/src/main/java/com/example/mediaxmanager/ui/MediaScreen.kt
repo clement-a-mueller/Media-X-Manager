@@ -36,9 +36,6 @@ import androidx.compose.ui.zIndex
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.PointerInputChange
 
 sealed class Screen {
     object Home : Screen()
@@ -99,29 +96,11 @@ fun MediaScreen(viewModel: MediaViewModel) {
 
     val content: @Composable () -> Unit = {
         Box(modifier = Modifier.fillMaxSize()) {
-
-            val homeActive     = selectedScreen is Screen.Home
-            val searchActive   = selectedScreen is Screen.Search
-            val settingsActive = selectedScreen is Screen.Settings
-
-            // Helper modifier — swallows all touches when the screen is hidden
-            fun Modifier.blockIfInactive(active: Boolean) = this.then(
-                if (!active) Modifier.pointerInput(Unit) {
-                    awaitPointerEventScope {
-                        while (true) {
-                            awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
-                                .changes.forEach { change: PointerInputChange -> change.consume() }
-                        }
-                    }
-                } else Modifier
-            )
-
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .zIndex(if (homeActive) 1f else 0f)
-                    .graphicsLayer { alpha = if (homeActive) 1f else 0f }
-                    .blockIfInactive(homeActive)
+                    .zIndex(if (selectedScreen is Screen.Home) 1f else 0f)
+                    .graphicsLayer { alpha = if (selectedScreen is Screen.Home) 1f else 0f }
             ) {
                 HomeScreen(viewModel, appStyle)
             }
@@ -129,23 +108,21 @@ fun MediaScreen(viewModel: MediaViewModel) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .zIndex(if (searchActive) 1f else 0f)
-                    .graphicsLayer { alpha = if (searchActive) 1f else 0f }
-                    .blockIfInactive(searchActive)
+                    .zIndex(if (selectedScreen is Screen.Search) 1f else 0f)
+                    .graphicsLayer { alpha = if (selectedScreen is Screen.Search) 1f else 0f }
             ) {
-                if (searchActive) BackHandler { selectedScreen = Screen.Home }
-                SearchScreen(viewModel, appStyle, animatedDominantColor)
+                SearchScreen(viewModel, appStyle, animatedDominantColor,
+                    onBack = { selectedScreen = Screen.Home })
             }
 
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .zIndex(if (settingsActive) 1f else 0f)
-                    .graphicsLayer { alpha = if (settingsActive) 1f else 0f }
-                    .blockIfInactive(settingsActive)
+                    .zIndex(if (selectedScreen is Screen.Settings) 1f else 0f)
+                    .graphicsLayer { alpha = if (selectedScreen is Screen.Settings) 1f else 0f }
             ) {
-                if (settingsActive) BackHandler { selectedScreen = Screen.Home }
                 SettingsScreen(
+                    onBack = { selectedScreen = Screen.Home },
                     currentStyle = appStyle,
                     onStyleChange = { newStyle ->
                         appStyle = newStyle

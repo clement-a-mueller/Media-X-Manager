@@ -2,6 +2,7 @@ package com.example.mediaxmanager.ui.screens
 
 import android.content.Context
 import android.graphics.Bitmap
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -163,6 +164,8 @@ fun PlaylistDetailScreen(
     appStyle:      AppStyle = AppStyle.DYNAMIC,
     dominantColor: Color    = Color(0xFF1C1B1F)
 ) {
+    BackHandler { onBack() }
+
     val context   = LocalContext.current
     val allTracks = TrackCache.tracks
 

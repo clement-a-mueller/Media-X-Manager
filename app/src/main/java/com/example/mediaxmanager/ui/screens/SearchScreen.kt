@@ -277,7 +277,8 @@ fun appBgColor(
 fun SearchScreen(
     viewModel:     MediaViewModel,
     appStyle:      AppStyle = AppStyle.DYNAMIC,
-    dominantColor: Color    = Color(0xFF1C1B1F)
+    dominantColor: Color    = Color(0xFF1C1B1F),
+    onBack:        () -> Unit = {}
 ) {
     val context = LocalContext.current
     val prefs   = remember { context.getSharedPreferences("settings", Context.MODE_PRIVATE) }
@@ -340,6 +341,12 @@ fun SearchScreen(
     var jellyfinLoading  by remember { mutableStateOf(false) }
     var jellyfinError    by remember { mutableStateOf<String?>(null) }
     var openJfAlbumId    by remember { mutableStateOf<String?>(null) }
+
+    // Only go back to Home when no overlay is open
+    BackHandler(
+        enabled = openPlaylistId == null && openFolderPath == null &&
+                openJfAlbumId == null && browserPath == null
+    ) { onBack() }
 
     // ── Load local tracks ─────────────────────────────────────────────────────
     LaunchedEffect(Unit) {
@@ -947,6 +954,8 @@ fun JellyfinAlbumDetailScreen(
     val bgColor = appBgColor(appStyle, dominantColor, prefs)
     val album   = albums.firstOrNull { it.id == albumId }
 
+    BackHandler { onBack() }
+
     var tracks     by remember { mutableStateOf<List<LocalTrack>>(emptyList()) }
     var isLoading  by remember { mutableStateOf(true) }
     var headerArt  by remember { mutableStateOf<Bitmap?>(null) }
@@ -1313,6 +1322,7 @@ fun AddFolderToPlaylistSheet(tracks: List<LocalTrack>, repo: PlaylistRepository,
 @Composable
 fun FolderDetailScreen(folderPath: String, allTracks: List<LocalTrack>, context: Context,
                        viewModel: MediaViewModel, repo: PlaylistRepository, appStyle: AppStyle, dominantColor: Color, onBack: () -> Unit) {
+    BackHandler { onBack() }
     val folder  = remember(folderPath) { File(folderPath) }
     val prefs   = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
     val bgColor = appBgColor(appStyle, dominantColor, prefs)
