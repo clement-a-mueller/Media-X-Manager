@@ -326,6 +326,14 @@ fun SearchScreen(
         else emptyList()
     }
 
+    // Singles = tracks sitting directly in the root folder (not inside any subfolder)
+    val singles = remember(allTracks, likedFolderPath) {
+        val root = (likedFolderPath?.let { File(it) } ?: File(MUSIC_ROOT)).absolutePath
+        allTracks.filter { track ->
+            val parent = File(track.path).parent
+            parent == root
+        }.sortedBy { it.title.lowercase() }
+    }
     // ── Jellyfin state ────────────────────────────────────────────────────────
     var jellyfinTracks   by remember { mutableStateOf(TrackCache.jellyfinTracks) }
     var jellyfinAlbums   by remember { mutableStateOf(TrackCache.jellyfinAlbums) }
@@ -402,12 +410,18 @@ fun SearchScreen(
 
     val activeTracks = if (activeSource == MediaSource.JELLYFIN) jellyfinTracks else allTracks
 
-    val filteredTracks = remember(query, activeTracks) {
-        if (query.isBlank()) emptyList()
-        else activeTracks.filter {
-            it.title.contains(query, ignoreCase = true) ||
-                    it.artist.contains(query, ignoreCase = true) ||
-                    it.album.contains(query, ignoreCase = true)
+    var filteredTracks by remember { mutableStateOf<List<LocalTrack>>(emptyList()) }
+    LaunchedEffect(query, activeTracks) {
+        if (query.isBlank()) {
+            filteredTracks = emptyList()
+        } else {
+            filteredTracks = withContext(Dispatchers.Default) {
+                activeTracks.filter {
+                    it.title.contains(query, ignoreCase = true) ||
+                            it.artist.contains(query, ignoreCase = true) ||
+                            it.album.contains(query, ignoreCase = true)
+                }
+            }
         }
     }
 
@@ -569,6 +583,7 @@ fun SearchScreen(
                     )
                 },
                 leadingIcon = { Icon(Icons.Default.Search, null, tint = Color.White.copy(alpha = 0.6f)) },
+                trailingIcon = { if (query.isNotBlank()) IconButton(onClick = { query = "" }) { Icon(Icons.Default.Close, "Clear", tint = Color.White.copy(alpha = 0.5f)) } },
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor     = Color.White, unfocusedTextColor   = Color.White,
@@ -709,6 +724,29 @@ fun SearchScreen(
                                                 }
                                             }
                                             repeat(3 - rowFolders.size) { Spacer(modifier = Modifier.weight(1f)) }
+                                        }
+                                    }
+                                }
+                                Spacer(Modifier.height(24.dp))
+                            }
+                        }
+
+                        if (singles.isNotEmpty()) {
+                            item(key = "singles_header") {
+                                Text("Singles", style = MaterialTheme.typography.labelSmall,
+                                    color = Color.White.copy(alpha = 0.5f), modifier = Modifier.padding(bottom = 12.dp))
+                            }
+                            item(key = "singles_content") {
+                                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    singles.chunked(3).forEach { rowTracks ->
+                                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                            rowTracks.forEach { track ->
+                                                Box(modifier = Modifier.weight(1f)) {
+                                                    SingleSquareCard(track = track, context = context,
+                                                        queue = singles, viewModel = viewModel, repo = repo)
+                                                }
+                                            }
+                                            repeat(3 - rowTracks.size) { Spacer(modifier = Modifier.weight(1f)) }
                                         }
                                     }
                                 }
@@ -1107,6 +1145,84 @@ fun FolderSquareCard(folder: File, allTracks: List<LocalTrack>, context: Context
         }
         if (showSheet && folderTracks.isNotEmpty()) {
             AddFolderToPlaylistSheet(tracks = folderTracks, repo = repo, onDismiss = { showSheet = false })
+        }
+    }
+}
+
+// ─── Single square card ───────────────────────────────────────────────────────
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun SingleSquareCard(track: LocalTrack, context: Context, queue: List<LocalTrack>, viewModel: MediaViewModel?, repo: PlaylistRepository) {
+    val trackKey   = track.uri.toString().ifBlank { track.path }
+    var art        by remember(trackKey) { mutableStateOf<Bitmap?>(null) }
+    var showMenu   by remember { mutableStateOf(false) }
+    var showSheet  by remember { mutableStateOf(false) }
+    val resolvedRepo = repo
+    val playlists  by resolvedRepo.playlists.collectAsStateWithLifecycle()
+    val isLiked = remember(playlists, trackKey) {
+        playlists.firstOrNull { it.id == PlaylistRepository.LIKED_ID }?.trackUris?.contains(trackKey) == true
+    }
+    LaunchedEffect(trackKey) {
+        if (TrackCache.artCache.containsKey(trackKey)) {
+            art = TrackCache.artCache[trackKey]
+        } else {
+            val (bitmap, _) = getMetadataForTrack(context, track)
+            art = bitmap
+        }
+    }
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.fillMaxWidth().combinedClickable(
+            onClick = {
+                if (viewModel != null) {
+                    if (viewModel.mediaState.value.isPlaying) { viewModel.playPause(); viewModel.spotifyWasPausedByUs = true }
+                    viewModel.resumeLocalMedia()
+                    viewModel.playLocalTrack(context, track, queue.ifEmpty { listOf(track) })
+                } else {
+                    context.startActivity(Intent(Intent.ACTION_VIEW).apply { setDataAndType(track.uri, "audio/*"); flags = Intent.FLAG_GRANT_READ_URI_PERMISSION })
+                }
+            },
+            onLongClick = { showMenu = true }
+        )) {
+            Box(modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(14.dp))
+                .background(Color.White.copy(alpha = 0.08f)), contentAlignment = Alignment.Center) {
+                if (art != null) {
+                    Image(bitmap = art!!.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                    Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.5f)), startY = 60f)))
+                } else Icon(Icons.Default.MusicNote, null, tint = Color.White.copy(alpha = 0.4f), modifier = Modifier.fillMaxSize(0.35f))
+                // Like button overlay
+                Box(modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp)
+                    .size(28.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.35f))
+                    .clickable { resolvedRepo.toggleLike(trackKey) },
+                    contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = if (isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                        contentDescription = null,
+                        tint = if (isLiked) Color(0xFFFF6B9D) else Color.White.copy(alpha = 0.6f),
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(track.title, color = Color.White, style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 2.dp))
+            Text(track.artist.takeIf { it != "Unknown" } ?: "", color = Color.White.copy(alpha = 0.38f),
+                style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 2.dp))
+        }
+        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }, modifier = Modifier.background(Color(0xFF1E1E1E))) {
+            DropdownMenuItem(text = { Text("Play", color = Color.White) },
+                leadingIcon = { Icon(Icons.Default.PlayArrow, null, tint = Color.White) },
+                onClick = { showMenu = false; viewModel?.playLocalTrack(context, track, queue.ifEmpty { listOf(track) }) })
+            DropdownMenuItem(text = { Text("Add to queue", color = Color.White) },
+                leadingIcon = { Icon(Icons.Default.QueueMusic, null, tint = Color.White) },
+                onClick = { showMenu = false; viewModel?.addToLocalQueue(track) })
+            DropdownMenuItem(text = { Text("Add to playlist", color = Color.White) },
+                leadingIcon = { Icon(Icons.Default.PlaylistAdd, null, tint = Color.White) },
+                onClick = { showMenu = false; showSheet = true })
+        }
+        if (showSheet) {
+            AddToPlaylistSheet(track = track, repo = resolvedRepo, onDismiss = { showSheet = false })
         }
     }
 }
