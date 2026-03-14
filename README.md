@@ -57,6 +57,9 @@ The app needs **Notification Listener** access to read media sessions. On first 
 
 ---
 
+Some passages were written by ai
+
+---
 
 ## 📄 License
 
