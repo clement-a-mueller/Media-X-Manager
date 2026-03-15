@@ -61,11 +61,5 @@ Some passages were written by ai
 
 ---
 
-## 📄 License
-
-Distributed under the MIT License. See `LICENSE` for more information.
-
----
-
 <p align="center">Made with ❤️ using Jetpack Compose</p>
 
